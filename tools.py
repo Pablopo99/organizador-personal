@@ -162,3 +162,36 @@ def mark_objective_done(objective_id: int) -> dict:
             "UPDATE objectives SET done = 1 WHERE id = ?", (objective_id,)
         )
     return {"id": objective_id, "updated": cur.rowcount}
+
+
+# ----------------------------------------------------------------- tasks ----
+
+def add_task(text: str) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO tasks (text, done, created_at) VALUES (?, 0, ?)",
+            (text, now_iso()),
+        )
+        new_id = cur.lastrowid
+    return {"id": new_id, "text": text}
+
+
+def list_tasks(include_done: bool = False) -> list[dict]:
+    with db.connect() as conn:
+        if include_done:
+            rows = conn.execute(
+                "SELECT * FROM tasks ORDER BY done, id"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE done = 0 ORDER BY id"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def complete_task(task_id: int) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE tasks SET done = 1 WHERE id = ?", (task_id,)
+        )
+    return {"id": task_id, "updated": cur.rowcount}
