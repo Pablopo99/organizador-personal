@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
+# Secretos
+.env
+
+# Base de datos
+organizador.db
+organizador.db-journal
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
