@@ -22,3 +22,8 @@ def test_require_raises_for_missing(monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match="MISSING_VAR"):
         config._require("MISSING_VAR")
+
+
+def test_groq_api_key_loads_optionally():
+    # conftest fija un valor de test; debe existir y ser string
+    assert isinstance(config.GROQ_API_KEY, str)

@@ -23,6 +23,9 @@ TELEGRAM_TOKEN = _require("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
 ALLOWED_USER_ID = int(_require("ALLOWED_USER_ID"))
 
+# Opcional: si está vacía, el bot ignorará mensajes de voz con respuesta de "no configurado".
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+
 TIMEZONE = "Europe/Madrid"
 DB_PATH = str(_PROJECT_ROOT / "organizador.db")
 CATEGORIES = ("medical", "work", "personal", "other")
