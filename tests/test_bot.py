@@ -41,3 +41,47 @@ def test_nueva_command_resets_history(monkeypatch):
     reply = bot.process_incoming(text="/nueva", from_user_id=42)
     assert called["user_id"] == 42
     assert "reiniciada" in reply.lower()
+
+
+def test_process_voice_transcription_unauthorized_returns_none(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply = bot.process_voice_transcription("hola", from_user_id=999)
+    assert reply is None
+
+
+def test_process_voice_transcription_empty_returns_friendly_message(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply = bot.process_voice_transcription("", from_user_id=42)
+    assert "no he entendido" in reply.lower()
+
+
+def test_process_voice_transcription_whitespace_only_returns_friendly_message(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply = bot.process_voice_transcription("   \n  ", from_user_id=42)
+    assert "no he entendido" in reply.lower()
+
+
+def test_process_voice_transcription_composes_prefix(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def fake_brain(text, user_id=0):
+        return f"respuesta a: {text}"
+
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+
+    reply = bot.process_voice_transcription("añade comprar pan", from_user_id=42)
+
+    assert reply.startswith("📝 He entendido: «añade comprar pan»\n\n")
+    assert "respuesta a: añade comprar pan" in reply
+
+
+def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def explode(text, user_id=0):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(bot.brain, "handle_message", explode)
+
+    reply = bot.process_voice_transcription("hola", from_user_id=42)
+    assert "no puedo procesar" in reply.lower()
