@@ -120,3 +120,45 @@ def delete_event(event_id: int) -> dict:
     with db.connect() as conn:
         cur = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
     return {"id": event_id, "deleted": cur.rowcount}
+
+
+# ------------------------------------------------------------ objectives ----
+
+def add_objective(text: str, week_start: str) -> dict:
+    from date_utils import monday_of_week
+    parsed = date.fromisoformat(week_start)
+    normalized = monday_of_week(parsed).isoformat()
+    with db.connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO objectives (text, week_start, done, created_at)
+            VALUES (?, ?, 0, ?)
+            """,
+            (text, normalized, now_iso()),
+        )
+        new_id = cur.lastrowid
+    return {"id": new_id, "text": text, "week_start": normalized}
+
+
+def query_objectives(week_start: Optional[str]) -> list[dict]:
+    with db.connect() as conn:
+        if week_start:
+            from date_utils import monday_of_week
+            normalized = monday_of_week(date.fromisoformat(week_start)).isoformat()
+            rows = conn.execute(
+                "SELECT * FROM objectives WHERE week_start = ? ORDER BY id",
+                (normalized,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM objectives ORDER BY week_start DESC, id"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_objective_done(objective_id: int) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE objectives SET done = 1 WHERE id = ?", (objective_id,)
+        )
+    return {"id": objective_id, "updated": cur.rowcount}
