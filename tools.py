@@ -195,3 +195,150 @@ def complete_task(task_id: int) -> dict:
             "UPDATE tasks SET done = 1 WHERE id = ?", (task_id,)
         )
     return {"id": task_id, "updated": cur.rowcount}
+
+
+# -------------------------------------------------------------- registry ----
+
+TOOL_DEFINITIONS: list[dict] = [
+    {
+        "name": "add_event",
+        "description": (
+            "Añade un evento o cita al calendario. Para rutinas recurrentes, "
+            "usar recurring_rule con formato 'DAILY' o 'WEEKLY:MON|TUE|WED|THU|FRI|SAT|SUN'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "datetime_iso": {
+                    "type": "string",
+                    "description": "Fecha y hora ISO 8601 sin zona, ej. 2026-05-22T17:00:00",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": list(CATEGORIES),
+                },
+                "recurring_rule": {"type": ["string", "null"]},
+                "notes": {"type": ["string", "null"]},
+            },
+            "required": ["title", "datetime_iso", "category"],
+        },
+    },
+    {
+        "name": "query_events",
+        "description": "Lista eventos entre dos fechas. Expande recurrentes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date_from": {"type": "string", "description": "ISO 8601, ej. 2026-05-15T00:00:00"},
+                "date_to": {"type": "string"},
+                "category": {"type": ["string", "null"]},
+            },
+            "required": ["date_from", "date_to"],
+        },
+    },
+    {
+        "name": "update_event",
+        "description": "Modifica campos de un evento existente.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "integer"},
+                "fields": {"type": "object"},
+            },
+            "required": ["event_id", "fields"],
+        },
+    },
+    {
+        "name": "delete_event",
+        "description": "Borra un evento por su id. Confirmar con el usuario antes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"event_id": {"type": "integer"}},
+            "required": ["event_id"],
+        },
+    },
+    {
+        "name": "add_objective",
+        "description": (
+            "Añade un objetivo semanal. week_start puede ser cualquier fecha de la semana; "
+            "se normaliza al lunes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "week_start": {"type": "string", "description": "ISO date YYYY-MM-DD"},
+            },
+            "required": ["text", "week_start"],
+        },
+    },
+    {
+        "name": "query_objectives",
+        "description": "Lista objetivos. Si week_start es null, devuelve todos.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "week_start": {"type": ["string", "null"]},
+            },
+            "required": ["week_start"],
+        },
+    },
+    {
+        "name": "mark_objective_done",
+        "description": "Marca un objetivo como completado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"objective_id": {"type": "integer"}},
+            "required": ["objective_id"],
+        },
+    },
+    {
+        "name": "add_task",
+        "description": "Añade una tarea suelta sin fecha.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": "Lista tareas. Por defecto solo pendientes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_done": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "complete_task",
+        "description": "Marca una tarea como hecha.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "integer"}},
+            "required": ["task_id"],
+        },
+    },
+]
+
+
+_DISPATCH = {
+    "add_event": add_event,
+    "query_events": query_events,
+    "update_event": update_event,
+    "delete_event": delete_event,
+    "add_objective": add_objective,
+    "query_objectives": query_objectives,
+    "mark_objective_done": mark_objective_done,
+    "add_task": add_task,
+    "list_tasks": list_tasks,
+    "complete_task": complete_task,
+}
+
+
+def dispatch(name: str, arguments: dict):
+    if name not in _DISPATCH:
+        raise ValueError(f"herramienta desconocida: {name}")
+    return _DISPATCH[name](**arguments)
