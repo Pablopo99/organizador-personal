@@ -26,8 +26,13 @@ def process_incoming(text: str, from_user_id: int) -> Optional[str]:
     if from_user_id != ALLOWED_USER_ID:
         log.warning("Mensaje ignorado de user_id no autorizado: %s", from_user_id)
         return None
+
+    if text.strip().lower() in ("/nueva", "/reset", "/clear"):
+        brain.reset_history(from_user_id)
+        return "Conversación reiniciada. Empezamos de cero."
+
     try:
-        return brain.handle_message(text)
+        return brain.handle_message(text, user_id=from_user_id)
     except Exception:
         log.exception("Error procesando mensaje")
         return (
@@ -52,7 +57,7 @@ def main() -> None:
     log.info("Base de datos lista en %s", db.DB_PATH)
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _on_message))
+    app.add_handler(MessageHandler(filters.TEXT, _on_message))
 
     log.info("Bot arrancando (polling)…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

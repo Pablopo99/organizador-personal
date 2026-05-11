@@ -15,6 +15,8 @@ def temp_db(monkeypatch):
         path = f.name
     monkeypatch.setattr(db, "DB_PATH", path)
     db.init_schema()
+    # Limpia el historial conversacional para que los tests no se influyan
+    brain._history.clear()
     yield path
     os.unlink(path)
 
@@ -65,3 +67,54 @@ def test_handle_message_with_tool_use(monkeypatch):
     rows = tools.list_tasks()
     assert len(rows) == 1
     assert rows[0]["text"] == "comprar pan"
+
+
+def test_history_persists_across_calls(monkeypatch):
+    snapshots = []
+
+    def fake_create(**kwargs):
+        # Capturamos una copia superficial de messages en el momento de la llamada
+        snapshots.append(list(kwargs["messages"]))
+        return _text_response("respuesta")
+
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = fake_create
+    monkeypatch.setattr(brain, "_client", mock_client)
+
+    brain.handle_message("hola", user_id=1)
+    brain.handle_message("y ahora?", user_id=1)
+
+    # Primera llamada: solo el primer user
+    assert snapshots[0] == [{"role": "user", "content": "hola"}]
+    # Segunda llamada: primer user + assistant + segundo user
+    assert len(snapshots[1]) == 3
+    assert snapshots[1][0] == {"role": "user", "content": "hola"}
+    assert snapshots[1][1]["role"] == "assistant"
+    assert snapshots[1][2] == {"role": "user", "content": "y ahora?"}
+
+
+def test_reset_history_clears_user(monkeypatch):
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _text_response("ok")
+    monkeypatch.setattr(brain, "_client", mock_client)
+
+    brain.handle_message("hola", user_id=7)
+    assert 7 in brain._history
+    brain.reset_history(7)
+    assert 7 not in brain._history
+
+
+def test_trim_history_keeps_last_n_turns(monkeypatch):
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _text_response("ok")
+    monkeypatch.setattr(brain, "_client", mock_client)
+    monkeypatch.setattr(brain, "_MAX_TURNS_IN_HISTORY", 3)
+
+    for i in range(5):
+        brain.handle_message(f"msg {i}", user_id=99)
+
+    history = brain._history[99]
+    user_texts = [m for m in history if m["role"] == "user" and isinstance(m.get("content"), str)]
+    assert len(user_texts) == 3
+    assert user_texts[0]["content"] == "msg 2"
+    assert user_texts[-1]["content"] == "msg 4"
