@@ -62,3 +62,32 @@ def test_transcribe_propagates_groq_exception(monkeypatch):
 
     with pytest.raises(RuntimeError, match="groq down"):
         transcriber.transcribe(b"fake")
+
+
+@pytest.mark.parametrize("hallucination", [
+    "Gracias por ver el video.",
+    "¡Gracias por ver el vídeo!",
+    "Subtítulos por la comunidad de Amara.org",
+    "Subtitulado por la comunidad de Amara.org",
+    "Subtítulos realizados por la comunidad de Amara.org",
+    "Suscríbete al canal",
+    "Suscribete al canal",
+])
+def test_transcribe_filters_whisper_hallucinations(monkeypatch, hallucination):
+    """Cuando Whisper devuelve frases típicas sobre silencio, transcribe debe devolver ''."""
+    mock_client = MagicMock()
+    mock_client.audio.transcriptions.create.return_value = hallucination
+    monkeypatch.setattr(transcriber, "_client", mock_client)
+
+    result = transcriber.transcribe(b"fake")
+    assert result == ""
+
+
+def test_transcribe_does_not_filter_real_content(monkeypatch):
+    """Una frase real que mencione 'gracias' pero no sea alucinación debe pasar."""
+    mock_client = MagicMock()
+    mock_client.audio.transcriptions.create.return_value = "Apunta cita médico el jueves"
+    monkeypatch.setattr(transcriber, "_client", mock_client)
+
+    result = transcriber.transcribe(b"fake")
+    assert result == "Apunta cita médico el jueves"
