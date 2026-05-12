@@ -238,13 +238,22 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "query_events",
-        "description": "Lista eventos entre dos fechas. Expande recurrentes.",
+        "description": (
+            "Lista eventos entre dos fechas. Expande recurrentes. "
+            "Por defecto solo devuelve eventos pendientes (done=0). "
+            "Para incluir también los marcados como hechos, usa include_done=true."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "date_from": {"type": "string", "description": "ISO 8601, ej. 2026-05-15T00:00:00"},
                 "date_to": {"type": "string"},
                 "category": {"type": ["string", "null"]},
+                "include_done": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Si es true, incluye también eventos con done=1.",
+                },
             },
             "required": ["date_from", "date_to"],
         },
