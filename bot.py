@@ -206,6 +206,12 @@ async def _set_bot_commands(application: Application) -> None:
 
 
 def main() -> None:
+    from datetime import time as dtime
+
+    import pytz
+
+    import scheduler
+
     db.init_schema()
     log.info("Base de datos lista en %s", db.DB_PATH)
 
@@ -218,6 +224,20 @@ def main() -> None:
     # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
+
+    # Jobs programados
+    madrid = pytz.timezone("Europe/Madrid")
+    app.job_queue.run_daily(
+        scheduler.morning_summary,
+        time=dtime(hour=9, minute=0, tzinfo=madrid),
+        name="morning_summary",
+    )
+    app.job_queue.run_repeating(
+        scheduler.check_reminders,
+        interval=300,
+        first=30,
+        name="check_reminders",
+    )
 
     log.info("Bot arrancando (polling)…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
