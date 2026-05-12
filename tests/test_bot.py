@@ -168,12 +168,12 @@ def test_markdown_bold_converted_to_html_in_process_incoming(monkeypatch):
 
 def test_markdown_to_html_helper_handles_multiline():
     text = "Esto es **negrita\ncon salto** de línea"
-    out = bot._markdown_to_html(text)
+    out = bot.markdown_to_html(text)
     assert "<b>negrita\ncon salto</b>" in out
 
 
 def test_markdown_to_html_helper_leaves_plain_text_alone():
-    assert bot._markdown_to_html("texto sin formato") == "texto sin formato"
+    assert bot.markdown_to_html("texto sin formato") == "texto sin formato"
 
 
 def test_markdown_bold_converted_in_slash_command(monkeypatch):
