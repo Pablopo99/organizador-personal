@@ -118,3 +118,31 @@ def test_trim_history_keeps_last_n_turns(monkeypatch):
     assert len(user_texts) == 3
     assert user_texts[0]["content"] == "msg 2"
     assert user_texts[-1]["content"] == "msg 4"
+
+
+def test_system_prompt_includes_motivator_tone():
+    prompt = brain._system_prompt()
+    lower = prompt.lower()
+    assert "coach" in lower or "motivador" in lower
+    assert "tutea" in lower or "tuteas" in lower
+
+
+def test_system_prompt_includes_html_formatting():
+    prompt = brain._system_prompt()
+    assert "<b>" in prompt or "HTML" in prompt
+
+
+def test_system_prompt_includes_emoji_guidance():
+    prompt = brain._system_prompt()
+    assert "📅" in prompt
+    assert "📝" in prompt
+    assert "🎯" in prompt
+
+
+def test_system_prompt_preserves_critical_rules():
+    """Las reglas críticas anteriores deben seguir ahí."""
+    prompt = brain._system_prompt()
+    lower = prompt.lower()
+    assert "consulta" in lower or "consúltala" in lower
+    assert "borrar" in lower
+    assert "confirma" in lower or "confirmaci" in lower
