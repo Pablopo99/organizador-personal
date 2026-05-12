@@ -85,3 +85,84 @@ def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatc
 
     reply = bot.process_voice_transcription("hola", from_user_id=42)
     assert "no puedo procesar" in reply.lower()
+
+
+def test_slash_hoy_dispatches_summary_text(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    captured = {}
+
+    def fake_brain(text, user_id=0):
+        captured["text"] = text
+        captured["user_id"] = user_id
+        return "respuesta"
+
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+
+    reply = bot.process_slash_command("/hoy", from_user_id=42)
+    assert reply == "respuesta"
+    assert "hoy" in captured["text"].lower()
+    assert captured["user_id"] == 42
+
+
+def test_slash_semana_dispatches_week_summary(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def fake_brain(text, user_id=0):
+        assert "semana" in text.lower()
+        return "ok"
+
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+    reply = bot.process_slash_command("/semana", from_user_id=42)
+    assert reply == "ok"
+
+
+def test_slash_pendientes_dispatches_pending_tasks(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def fake_brain(text, user_id=0):
+        assert "pendientes" in text.lower() or "tareas" in text.lower()
+        return "ok"
+
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+    reply = bot.process_slash_command("/pendientes", from_user_id=42)
+    assert reply == "ok"
+
+
+def test_slash_objetivos_dispatches_objectives(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def fake_brain(text, user_id=0):
+        assert "objetivos" in text.lower()
+        return "ok"
+
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+    reply = bot.process_slash_command("/objetivos", from_user_id=42)
+    assert reply == "ok"
+
+
+def test_slash_unauthorized_user_returns_none(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply = bot.process_slash_command("/hoy", from_user_id=999)
+    assert reply is None
+
+
+def test_slash_unknown_command_returns_none(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply = bot.process_slash_command("/inventado", from_user_id=42)
+    assert reply is None
+
+
+def test_process_incoming_routes_known_slash_to_command_handler(monkeypatch):
+    """process_incoming debe enrutar /hoy al handler de comandos, no al cerebro con '/hoy' literal."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    called = {}
+
+    def fake_brain(text, user_id=0):
+        called["brain"] = text
+        return "from brain"
+
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+
+    reply = bot.process_incoming(text="/hoy", from_user_id=42)
+    assert "/hoy" not in called["brain"]
+    assert reply == "from brain"

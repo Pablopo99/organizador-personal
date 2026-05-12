@@ -3,9 +3,11 @@ import asyncio
 import logging
 from typing import Optional
 
-from telegram import Update
+from telegram import BotCommand, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
+    CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
@@ -23,15 +25,51 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
+# Mapa de comandos slash → frase natural que recibe el cerebro
+_SLASH_PROMPTS = {
+    "/hoy": "Hazme el resumen de hoy: eventos del día y tareas pendientes.",
+    "/semana": "Hazme el resumen de la semana actual: eventos próximos y objetivos.",
+    "/pendientes": "Lista mis tareas pendientes.",
+    "/objetivos": "¿Cómo van mis objetivos de esta semana?",
+}
+
+# Comandos slash que NO van al cerebro (control de bot)
+_RESET_COMMANDS = ("/nueva", "/reset", "/clear")
+
+
+def process_slash_command(command: str, from_user_id: int) -> Optional[str]:
+    """Lógica pura: ejecuta un comando slash conocido. Devuelve None si no autorizado o desconocido."""
+    if from_user_id != ALLOWED_USER_ID:
+        log.warning("Slash ignorado de user_id no autorizado: %s", from_user_id)
+        return None
+    cmd = command.strip().lower()
+    prompt = _SLASH_PROMPTS.get(cmd)
+    if prompt is None:
+        return None
+    try:
+        return brain.handle_message(prompt, user_id=from_user_id)
+    except Exception:
+        log.exception("Error procesando comando %s", cmd)
+        return (
+            "Ahora mismo no puedo procesar esto. "
+            "Prueba a reformularlo o vuelve a intentarlo en un momento."
+        )
+
+
 def process_incoming(text: str, from_user_id: int) -> Optional[str]:
     """Lógica pura: dado un mensaje de texto y user id, devuelve la respuesta (o None si no autorizado)."""
     if from_user_id != ALLOWED_USER_ID:
         log.warning("Mensaje ignorado de user_id no autorizado: %s", from_user_id)
         return None
 
-    if text.strip().lower() in ("/nueva", "/reset", "/clear"):
+    cleaned = text.strip().lower()
+
+    if cleaned in _RESET_COMMANDS:
         brain.reset_history(from_user_id)
         return "Conversación reiniciada. Empezamos de cero."
+
+    if cleaned in _SLASH_PROMPTS:
+        return process_slash_command(cleaned, from_user_id)
 
     try:
         return brain.handle_message(text, user_id=from_user_id)
@@ -73,7 +111,7 @@ async def _on_message(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         from_user_id=update.effective_user.id,
     )
     if reply is not None:
-        await update.message.reply_text(reply)
+        await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
 
 
 async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -112,14 +150,42 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     reply = process_voice_transcription(transcription, from_user_id=from_user_id)
     if reply is not None:
-        await update.message.reply_text(reply)
+        await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
+
+
+def _make_slash_handler(command: str):
+    """Factory: crea un handler async para un comando slash conocido."""
+    async def handler(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not update.effective_user:
+            return
+        reply = process_slash_command(command, from_user_id=update.effective_user.id)
+        if reply is not None:
+            await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
+    return handler
+
+
+async def _set_bot_commands(application: Application) -> None:
+    """Registra el menú de comandos visible al escribir '/' en Telegram."""
+    await application.bot.set_my_commands([
+        BotCommand("hoy", "Resumen de hoy"),
+        BotCommand("semana", "Resumen de la semana"),
+        BotCommand("pendientes", "Tareas pendientes"),
+        BotCommand("objetivos", "Objetivos de la semana"),
+        BotCommand("nueva", "Reiniciar conversación"),
+    ])
 
 
 def main() -> None:
     db.init_schema()
     log.info("Base de datos lista en %s", db.DB_PATH)
 
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).post_init(_set_bot_commands).build()
+
+    # Slash commands
+    for cmd in ("hoy", "semana", "pendientes", "objetivos"):
+        app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
+
+    # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
 
