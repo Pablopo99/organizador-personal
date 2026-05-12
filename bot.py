@@ -1,6 +1,7 @@
 """Listener de Telegram. Filtra por usuario autorizado y delega en el cerebro."""
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from telegram import BotCommand, Update
@@ -25,6 +26,17 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
+_BOLD_MD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def _markdown_to_html(text: str) -> str:
+    """Convierte Markdown bold (**texto**) a HTML (<b>texto</b>).
+
+    Defensa por si Claude se le escapa el formato Markdown a pesar del system prompt.
+    """
+    return _BOLD_MD_RE.sub(r"<b>\1</b>", text)
+
+
 # Mapa de comandos slash → frase natural que recibe el cerebro
 _SLASH_PROMPTS = {
     "/hoy": "Hazme el resumen de hoy: eventos del día y tareas pendientes.",
@@ -47,7 +59,7 @@ def process_slash_command(command: str, from_user_id: int) -> Optional[str]:
     if prompt is None:
         return None
     try:
-        return brain.handle_message(prompt, user_id=from_user_id)
+        return _markdown_to_html(brain.handle_message(prompt, user_id=from_user_id))
     except Exception:
         log.exception("Error procesando comando %s", cmd)
         return (
@@ -72,7 +84,7 @@ def process_incoming(text: str, from_user_id: int) -> Optional[str]:
         return process_slash_command(cleaned, from_user_id)
 
     try:
-        return brain.handle_message(text, user_id=from_user_id)
+        return _markdown_to_html(brain.handle_message(text, user_id=from_user_id))
     except Exception:
         log.exception("Error procesando mensaje")
         return (
@@ -92,7 +104,7 @@ def process_voice_transcription(transcription: str, from_user_id: int) -> Option
         return "No he entendido nada del audio. ¿Puedes repetirlo o escribirme?"
 
     try:
-        brain_reply = brain.handle_message(cleaned, user_id=from_user_id)
+        brain_reply = _markdown_to_html(brain.handle_message(cleaned, user_id=from_user_id))
     except Exception:
         log.exception("Error procesando transcripción de voz")
         return (

@@ -152,6 +152,48 @@ def test_slash_unknown_command_returns_none(monkeypatch):
     assert reply is None
 
 
+def test_markdown_bold_converted_to_html_in_process_incoming(monkeypatch):
+    """Si Claude se le escapa **bold**, se convierte a <b>bold</b> antes de salir."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(bot.brain, "handle_message",
+                        lambda text, user_id=0: "Opción **uno** y **dos**")
+
+    reply = bot.process_incoming(text="hola", from_user_id=42)
+    assert "<b>uno</b>" in reply
+    assert "<b>dos</b>" in reply
+    assert "**" not in reply
+
+
+def test_markdown_to_html_helper_handles_multiline():
+    text = "Esto es **negrita\ncon salto** de línea"
+    out = bot._markdown_to_html(text)
+    assert "<b>negrita\ncon salto</b>" in out
+
+
+def test_markdown_to_html_helper_leaves_plain_text_alone():
+    assert bot._markdown_to_html("texto sin formato") == "texto sin formato"
+
+
+def test_markdown_bold_converted_in_slash_command(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(bot.brain, "handle_message",
+                        lambda text, user_id=0: "Sección **HOY**")
+
+    reply = bot.process_slash_command("/hoy", from_user_id=42)
+    assert "<b>HOY</b>" in reply
+    assert "**" not in reply
+
+
+def test_markdown_bold_converted_in_voice_transcription(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(bot.brain, "handle_message",
+                        lambda text, user_id=0: "Hecho, **listo**")
+
+    reply = bot.process_voice_transcription("ok", from_user_id=42)
+    assert "<b>listo</b>" in reply
+    assert "**listo**" not in reply
+
+
 def test_process_incoming_routes_known_slash_to_command_handler(monkeypatch):
     """process_incoming debe enrutar /hoy al handler de comandos, no al cerebro con '/hoy' literal."""
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
