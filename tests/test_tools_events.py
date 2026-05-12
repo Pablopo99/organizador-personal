@@ -106,3 +106,41 @@ def test_query_events_includes_done_when_flag_true():
     )
     titles = [r["title"] for r in rows]
     assert sorted(titles) == ["Pasado", "Vigente"]
+
+
+def test_update_event_with_datetime_resets_reminder_flags():
+    created = tools.add_event("X", "2026-06-01T10:00:00", "work")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET reminder_1d_sent = 1, reminder_1h_sent = 1 WHERE id = ?",
+            (created["id"],),
+        )
+
+    tools.update_event(created["id"], {"datetime": "2026-06-02T10:00:00"})
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT reminder_1d_sent, reminder_1h_sent FROM events WHERE id = ?",
+            (created["id"],),
+        ).fetchone()
+    assert row[0] == 0
+    assert row[1] == 0
+
+
+def test_update_event_with_title_keeps_reminder_flags():
+    """Si solo cambia el título, los flags se preservan."""
+    created = tools.add_event("X", "2026-06-01T10:00:00", "work")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET reminder_1d_sent = 1 WHERE id = ?",
+            (created["id"],),
+        )
+
+    tools.update_event(created["id"], {"title": "Y"})
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT reminder_1d_sent FROM events WHERE id = ?",
+            (created["id"],),
+        ).fetchone()
+    assert row[0] == 1

@@ -111,6 +111,11 @@ def update_event(event_id: int, fields: dict) -> dict:
         params.append(value)
     if not sets:
         return {"id": event_id, "updated": 0}
+
+    if "datetime" in fields:
+        sets.append("reminder_1d_sent = 0")
+        sets.append("reminder_1h_sent = 0")
+
     params.append(event_id)
     with db.connect() as conn:
         cur = conn.execute(

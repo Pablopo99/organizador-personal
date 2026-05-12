@@ -103,6 +103,35 @@ def test_migration_adds_done_to_events_in_old_db(monkeypatch):
     os.unlink(path)
 
 
+def test_migration_adds_reminder_flags_to_events(monkeypatch):
+    """BD vieja sin flags de recordatorio: init_schema los añade."""
+    import os
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    monkeypatch.setattr(db, "DB_PATH", path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("""
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                datetime TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'other',
+                recurring_rule TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+    db.init_schema()
+
+    with sqlite3.connect(path) as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    assert "reminder_1d_sent" in cols
+    assert "reminder_1h_sent" in cols
+    os.unlink(path)
+
+
 def test_init_schema_is_idempotent_with_existing_done_column(temp_db):
     """Llamar init_schema dos veces no falla si la columna ya existe."""
     db.init_schema()  # ya se llamó una vez en el fixture
