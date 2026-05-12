@@ -40,21 +40,38 @@ def _markdown_to_html(text: str) -> str:
 # Mapa de comandos slash → frase natural que recibe el cerebro
 _SLASH_PROMPTS = {
     "/hoy": (
-        "Hazme el resumen de hoy con TRES secciones (no más, no menos): "
-        "📅 HOY (eventos del día con done=0), "
-        "📝 PENDIENTES (tareas pendientes con list_tasks), "
-        "y ✅ COMPLETADO HOY (eventos de hoy con done=1 que obtengas con query_events include_done=true filtrando los hechos, MÁS tareas con done_at de hoy obtenidas con list_tasks include_done=true). "
-        "Si alguna sección está vacía, omítela. Termina con un cierre breve motivador, especialmente si he completado cosas."
+        "Resumen de hoy. SIGUE ESTOS PASOS EN ORDEN:\n"
+        "1. Llama a query_events(date_from=hoy 00:00, date_to=hoy 23:59, include_done=true) — devuelve TODOS los eventos de hoy.\n"
+        "2. Llama a list_tasks(include_done=true) — devuelve TODAS las tareas.\n"
+        "3. Construye estas secciones (OMITE las vacías sin decir nada):\n"
+        "   📅 HOY = eventos del paso 1 con done=0\n"
+        "   📝 PENDIENTES = tareas del paso 2 con done=0\n"
+        "   ✅ COMPLETADO HOY = eventos del paso 1 con done=1 + tareas del paso 2 cuyo done_at sea de hoy\n"
+        "4. Cierre motivador opcional de UNA frase si encaja.\n"
+        "NADA de preámbulos, notas o preguntas."
     ),
     "/semana": (
-        "Hazme el resumen de esta semana con TRES secciones: "
-        "📅 ESTA SEMANA (eventos pendientes próximos), "
-        "🎯 OBJETIVOS (objetivos de la semana — marca cuáles están hechos), "
-        "y ✅ COMPLETADO (eventos de la semana con done=1 + tareas completadas esta semana). "
-        "Si alguna sección está vacía, omítela. Cierra con un comentario motivador."
+        "Resumen de la semana. SIGUE ESTOS PASOS EN ORDEN:\n"
+        "1. Llama a query_events(date_from=lunes 00:00, date_to=domingo 23:59 de esta semana, include_done=true).\n"
+        "2. Llama a query_objectives(week_start=lunes de esta semana).\n"
+        "3. Llama a list_tasks(include_done=true).\n"
+        "4. Construye estas secciones (OMITE las vacías sin decir nada):\n"
+        "   📅 ESTA SEMANA = eventos del paso 1 con done=0\n"
+        "   🎯 OBJETIVOS = objetivos del paso 2 (marca con ✅ los done=1)\n"
+        "   ✅ COMPLETADO = eventos del paso 1 con done=1 + tareas del paso 3 cuyo done_at sea de esta semana\n"
+        "5. Cierre motivador opcional de UNA frase si encaja.\n"
+        "NADA de preámbulos ni preguntas."
     ),
-    "/pendientes": "Lista mis tareas pendientes con formato HTML, una por bullet.",
-    "/objetivos": "¿Cómo van mis objetivos de esta semana? Muéstrame cuáles he cumplido y cuáles me quedan, con motivación.",
+    "/pendientes": (
+        "Lista mis tareas pendientes (list_tasks con include_done=false) en formato HTML, una por bullet. "
+        "Sin preámbulos. Si la lista está vacía, di solo «No tienes tareas pendientes. 🎉»."
+    ),
+    "/objetivos": (
+        "Muéstrame el estado de mis objetivos de esta semana. "
+        "Llama a query_objectives(week_start=lunes de esta semana). "
+        "Lista cada uno con ✅ si está done=1 o 🔲 si no. "
+        "Una frase de cierre con ánimo. Sin preámbulos."
+    ),
 }
 
 # Comandos slash que NO van al cerebro (control de bot)
