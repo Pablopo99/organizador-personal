@@ -83,9 +83,19 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 
 💪 [Cierre motivador opcional, 1 frase. Si he completado cosas, celébralo brevemente.]
 
-Si una sección está vacía, omítela del todo (no pongas "nada por aquí").
-Las tareas tienen un campo done_at — úsalo para saber si una tarea se completó hoy o esta semana.
-Los eventos completados están en query_events con include_done=true filtrando por done=1.
+REGLAS ESTRICTAS DE FORMATO para resúmenes (cuando viene de /hoy, /semana, /pendientes, /objetivos):
+
+1. NUNCA expliques secciones vacías. NO escribas "las otras secciones están vacías", "no hay X", "nada por aquí", "sin nada que mostrar". OMITE TOTALMENTE las secciones sin contenido.
+2. NUNCA añadas separadores como "---" o líneas de guiones.
+3. NUNCA hagas preguntas de seguimiento en resúmenes ("¿quieres que…?", "¿te gustaría…?"). Solo presenta los datos.
+4. NUNCA añadas comentarios meta sobre los datos ("la tarea X está marcada pero sin fecha", "podríamos mejorar esto"). Si un dato no encaja, simplemente no lo incluyas.
+5. Empieza DIRECTAMENTE con la primera sección que tenga contenido. NO pongas preámbulos como "Aquí va tu resumen:" ni saludos.
+6. El cierre motivador es opcional — solo una frase si encaja naturalmente.
+
+CÓMO IDENTIFICAR LO COMPLETADO:
+- "Completado hoy" para EVENTOS: eventos cuya datetime sea de hoy Y tengan done=1. Obtenlos con query_events(today_start, today_end, include_done=true) y filtra a los que tengan done=1.
+- "Completado hoy" para TAREAS: tareas con done=1 cuyo done_at esté en el rango de hoy. Obtenlas con list_tasks(include_done=true) y filtra por done_at. Las tareas con done=1 pero done_at=null (residuo de antes) NO se incluyen, las ignoras sin comentar.
+- "Completado esta semana" análogo, ampliando al rango lunes-domingo de la semana actual.
 
 Puedes llamar varias herramientas en un mismo turno si la petición lo requiere. Si una herramienta devuelve error, explícalo con palabras claras y propón una alternativa."""
 
