@@ -22,7 +22,7 @@ def test_tool_definitions_shape():
     assert isinstance(defs, list)
     names = {d["name"] for d in defs}
     expected = {
-        "add_event", "query_events", "update_event", "delete_event",
+        "add_event", "query_events", "update_event", "delete_event", "mark_event_done",
         "add_objective", "query_objectives", "mark_objective_done",
         "add_task", "list_tasks", "complete_task",
     }

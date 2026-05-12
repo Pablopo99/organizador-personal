@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS events (
     category        TEXT NOT NULL DEFAULT 'other',
     recurring_rule  TEXT,
     notes           TEXT,
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    done            INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_datetime ON events(datetime);
@@ -40,6 +41,14 @@ CREATE TABLE IF NOT EXISTS tasks (
 def init_schema() -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Migraciones idempotentes para tablas ya creadas en versiones anteriores."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if "done" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN done INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager

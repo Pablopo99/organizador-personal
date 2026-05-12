@@ -41,6 +41,7 @@ def query_events(
     date_from: str,
     date_to: str,
     category: Optional[str] = None,
+    include_done: bool = False,
 ) -> list[dict]:
     dt_from = datetime.fromisoformat(date_from)
     dt_to = datetime.fromisoformat(date_to)
@@ -48,6 +49,8 @@ def query_events(
     with db.connect() as conn:
         params: list = []
         sql = "SELECT * FROM events WHERE 1=1"
+        if not include_done:
+            sql += " AND COALESCE(done, 0) = 0"
         if category:
             sql += " AND category = ?"
             params.append(category)
@@ -120,6 +123,14 @@ def delete_event(event_id: int) -> dict:
     with db.connect() as conn:
         cur = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
     return {"id": event_id, "deleted": cur.rowcount}
+
+
+def mark_event_done(event_id: int) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE events SET done = 1 WHERE id = ?", (event_id,)
+        )
+    return {"id": event_id, "updated": cur.rowcount}
 
 
 # ------------------------------------------------------------ objectives ----
@@ -259,6 +270,19 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "mark_event_done",
+        "description": (
+            "Marca un evento como hecho/pasado. Úsala cuando el usuario diga "
+            "'ya pasó X', 'ya he ido al Y', 'ya hice la reunión Z'. Los eventos "
+            "marcados como hechos no salen en query_events por defecto."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"event_id": {"type": "integer"}},
+            "required": ["event_id"],
+        },
+    },
+    {
         "name": "add_objective",
         "description": (
             "Añade un objetivo semanal. week_start puede ser cualquier fecha de la semana; "
@@ -329,6 +353,7 @@ _DISPATCH = {
     "query_events": query_events,
     "update_event": update_event,
     "delete_event": delete_event,
+    "mark_event_done": mark_event_done,
     "add_objective": add_objective,
     "query_objectives": query_objectives,
     "mark_objective_done": mark_objective_done,

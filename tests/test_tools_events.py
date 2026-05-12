@@ -78,3 +78,31 @@ def test_delete_event_removes_it():
 def test_add_event_rejects_invalid_category():
     with pytest.raises(ValueError, match="categoría"):
         tools.add_event("X", "2026-05-15T10:00:00", "invalid_cat")
+
+
+def test_mark_event_done_updates_flag():
+    created = tools.add_event("Dentista", "2026-05-15T10:00:00", "medical")
+    res = tools.mark_event_done(created["id"])
+    assert res["updated"] == 1
+
+
+def test_query_events_hides_done_by_default():
+    a = tools.add_event("Pasado", "2026-05-15T10:00:00", "medical")
+    tools.add_event("Vigente", "2026-05-15T11:00:00", "work")
+    tools.mark_event_done(a["id"])
+
+    rows = tools.query_events("2026-05-15T00:00:00", "2026-05-15T23:59:59")
+    titles = [r["title"] for r in rows]
+    assert titles == ["Vigente"]
+
+
+def test_query_events_includes_done_when_flag_true():
+    a = tools.add_event("Pasado", "2026-05-15T10:00:00", "medical")
+    tools.add_event("Vigente", "2026-05-15T11:00:00", "work")
+    tools.mark_event_done(a["id"])
+
+    rows = tools.query_events(
+        "2026-05-15T00:00:00", "2026-05-15T23:59:59", include_done=True
+    )
+    titles = [r["title"] for r in rows]
+    assert sorted(titles) == ["Pasado", "Vigente"]
