@@ -49,6 +49,31 @@ def test_connection_context_manager_commits(temp_db):
     assert row[0] == "comprar pan"
 
 
+def test_migration_adds_done_at_to_tasks_in_old_db(monkeypatch):
+    """BD vieja sin done_at en tasks: init_schema la añade."""
+    import os
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    monkeypatch.setattr(db, "DB_PATH", path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("""
+            CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                done INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+    db.init_schema()
+
+    with sqlite3.connect(path) as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    assert "done_at" in cols
+    os.unlink(path)
+
+
 def test_migration_adds_done_to_events_in_old_db(monkeypatch):
     """Si existe una BD vieja sin columna 'done' en events, init_schema la añade."""
     import os

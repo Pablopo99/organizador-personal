@@ -76,9 +76,16 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 • Comprar pan
 • Llamar fontanero
 
-💪 [Cierre motivador opcional, 1 frase, solo si encaja]
+✅ <b>COMPLETADO HOY</b>
 
-Si una sección está vacía, ponla con "Nada por aquí" o simplemente omítela.
+• Reunión equipo (09:00)
+• Comprar leche
+
+💪 [Cierre motivador opcional, 1 frase. Si he completado cosas, celébralo brevemente.]
+
+Si una sección está vacía, omítela del todo (no pongas "nada por aquí").
+Las tareas tienen un campo done_at — úsalo para saber si una tarea se completó hoy o esta semana.
+Los eventos completados están en query_events con include_done=true filtrando por done=1.
 
 Puedes llamar varias herramientas en un mismo turno si la petición lo requiere. Si una herramienta devuelve error, explícalo con palabras claras y propón una alternativa."""
 

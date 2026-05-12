@@ -101,6 +101,8 @@ def test_slash_hoy_dispatches_summary_text(monkeypatch):
     reply = bot.process_slash_command("/hoy", from_user_id=42)
     assert reply == "respuesta"
     assert "hoy" in captured["text"].lower()
+    # Ahora el prompt incluye sección de completado
+    assert "completado" in captured["text"].lower()
     assert captured["user_id"] == 42
 
 

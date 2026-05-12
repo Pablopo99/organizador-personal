@@ -39,10 +39,22 @@ def _markdown_to_html(text: str) -> str:
 
 # Mapa de comandos slash → frase natural que recibe el cerebro
 _SLASH_PROMPTS = {
-    "/hoy": "Hazme el resumen de hoy: eventos del día y tareas pendientes.",
-    "/semana": "Hazme el resumen de la semana actual: eventos próximos y objetivos.",
-    "/pendientes": "Lista mis tareas pendientes.",
-    "/objetivos": "¿Cómo van mis objetivos de esta semana?",
+    "/hoy": (
+        "Hazme el resumen de hoy con TRES secciones (no más, no menos): "
+        "📅 HOY (eventos del día con done=0), "
+        "📝 PENDIENTES (tareas pendientes con list_tasks), "
+        "y ✅ COMPLETADO HOY (eventos de hoy con done=1 que obtengas con query_events include_done=true filtrando los hechos, MÁS tareas con done_at de hoy obtenidas con list_tasks include_done=true). "
+        "Si alguna sección está vacía, omítela. Termina con un cierre breve motivador, especialmente si he completado cosas."
+    ),
+    "/semana": (
+        "Hazme el resumen de esta semana con TRES secciones: "
+        "📅 ESTA SEMANA (eventos pendientes próximos), "
+        "🎯 OBJETIVOS (objetivos de la semana — marca cuáles están hechos), "
+        "y ✅ COMPLETADO (eventos de la semana con done=1 + tareas completadas esta semana). "
+        "Si alguna sección está vacía, omítela. Cierra con un comentario motivador."
+    ),
+    "/pendientes": "Lista mis tareas pendientes con formato HTML, una por bullet.",
+    "/objetivos": "¿Cómo van mis objetivos de esta semana? Muéstrame cuáles he cumplido y cuáles me quedan, con motivación.",
 }
 
 # Comandos slash que NO van al cerebro (control de bot)

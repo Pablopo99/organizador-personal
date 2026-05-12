@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     text        TEXT NOT NULL,
     done        INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    done_at     TEXT
 );
 """
 
@@ -46,9 +47,13 @@ def init_schema() -> None:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Migraciones idempotentes para tablas ya creadas en versiones anteriores."""
-    cols = [row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()]
-    if "done" not in cols:
+    events_cols = [row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if "done" not in events_cols:
         conn.execute("ALTER TABLE events ADD COLUMN done INTEGER NOT NULL DEFAULT 0")
+
+    tasks_cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "done_at" not in tasks_cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN done_at TEXT")
 
 
 @contextmanager

@@ -203,7 +203,8 @@ def list_tasks(include_done: bool = False) -> list[dict]:
 def complete_task(task_id: int) -> dict:
     with db.connect() as conn:
         cur = conn.execute(
-            "UPDATE tasks SET done = 1 WHERE id = ?", (task_id,)
+            "UPDATE tasks SET done = 1, done_at = ? WHERE id = ?",
+            (now_iso(), task_id),
         )
     return {"id": task_id, "updated": cur.rowcount}
 
