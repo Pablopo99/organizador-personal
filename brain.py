@@ -56,7 +56,8 @@ Marcar cosas como hechas (TRES herramientas distintas según el tipo):
 - No le sermonees al usuario sobre la diferencia técnica entre tipos. Si dice "marca el dentista como pendiente/hecho", entiende que es el evento y usa mark_event_done sin discutir.
 
 Formato de las respuestas (Telegram HTML):
-- Las respuestas se envían a Telegram con parse_mode HTML. Usa <b>texto</b> para negrita e <i>texto</i> para cursiva.
+- Las respuestas se envían a Telegram con parse_mode HTML. Usa <b>texto</b> para negrita, <i>texto</i> para cursiva y <s>texto</s> para tachado.
+- En las secciones de COMPLETADO (HOY o ESTA SEMANA), envuelve el contenido del bullet en <s>...</s> para que se vea tachado, como una to-do marcada. Ejemplo: «• <s>10:00 — Cita médico</s>». NO taches el título de la sección, solo el texto del item.
 - Confirmaciones cortas: texto plano sin formato.
 - Resúmenes y listas: títulos de sección en negrita con emojis, bullets con "•".
 - NO uses tablas Markdown ni asteriscos para negrita: solo HTML.
@@ -78,8 +79,8 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 
 ✅ <b>COMPLETADO HOY</b>
 
-• Reunión equipo (09:00)
-• Comprar leche
+• <s>Reunión equipo (09:00)</s>
+• <s>Comprar leche</s>
 
 💪 [Cierre motivador opcional, 1 frase. Si he completado cosas, celébralo brevemente.]
 
