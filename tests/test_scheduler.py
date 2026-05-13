@@ -47,6 +47,49 @@ async def test_morning_summary_sends_to_allowed_user(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_morning_summary_uses_isolated_history(monkeypatch):
+    """El scheduler usa un user_id propio, no el del usuario real."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    captured = {}
+
+    def fake_brain(text, user_id=0):
+        captured["user_id"] = user_id
+        return "🌅 Buenos días"
+
+    monkeypatch.setattr(scheduler.brain, "handle_message", fake_brain)
+
+    # Llenamos la memoria del usuario real con basura — el scheduler no debe usarla
+    scheduler.brain._history[42] = [{"role": "user", "content": "chorro de turnos previos"}]
+
+    await scheduler.morning_summary(_fake_context())
+
+    assert captured["user_id"] != 42  # No usa el del usuario real
+    assert captured["user_id"] == scheduler._SCHEDULER_USER_ID
+
+
+@pytest.mark.asyncio
+async def test_morning_summary_resets_history_each_run(monkeypatch):
+    """Cada matutino empieza con historial limpio para el user_id del scheduler."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(
+        scheduler.brain, "handle_message",
+        lambda text, user_id=0: "ok"
+    )
+
+    # Simulamos basura del run anterior
+    sid = scheduler._SCHEDULER_USER_ID
+    scheduler.brain._history[sid] = [{"role": "user", "content": "basura previa"}]
+
+    await scheduler.morning_summary(_fake_context())
+
+    # Después del reset y la llamada mockeada (que no añade nada), el historial
+    # del scheduler debe NO contener la basura previa.
+    history = scheduler.brain._history.get(sid, [])
+    contents = [m.get("content") for m in history if isinstance(m.get("content"), str)]
+    assert "basura previa" not in contents
+
+
+@pytest.mark.asyncio
 async def test_morning_summary_converts_markdown_to_html(monkeypatch):
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     monkeypatch.setattr(

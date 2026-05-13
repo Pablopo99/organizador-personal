@@ -12,6 +12,10 @@ from formatting import markdown_to_html
 
 log = logging.getLogger("scheduler")
 
+# User id interno (no real) para aislar la memoria conversacional del scheduler
+# del chat normal del usuario. Cada matutino se genera con historial limpio.
+_SCHEDULER_USER_ID = -1
+
 _WEEKDAYS_ES = [
     "lunes", "martes", "miércoles", "jueves",
     "viernes", "sábado", "domingo",
@@ -39,8 +43,10 @@ def _morning_prompt() -> str:
 
 async def morning_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Envía el saludo matutino con el resumen del día."""
+    # Aislamos el contexto del scheduler: nada de memoria heredada del chat.
+    brain.reset_history(_SCHEDULER_USER_ID)
     try:
-        reply = brain.handle_message(_morning_prompt(), user_id=ALLOWED_USER_ID)
+        reply = brain.handle_message(_morning_prompt(), user_id=_SCHEDULER_USER_ID)
     except Exception:
         log.exception("Error generando el saludo matutino")
         return
