@@ -139,3 +139,94 @@ def test_init_schema_is_idempotent_with_existing_done_column(temp_db):
     with sqlite3.connect(temp_db) as conn:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
     assert cols.count("done") == 1
+
+
+def test_migration_creates_routine_completions_table(monkeypatch):
+    """BD vieja sin la tabla: init_schema la crea."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    monkeypatch.setattr(db, "DB_PATH", path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("""
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                datetime TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'other',
+                recurring_rule TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                done INTEGER NOT NULL DEFAULT 0,
+                reminder_1d_sent INTEGER NOT NULL DEFAULT 0,
+                reminder_1h_sent INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.commit()
+
+    db.init_schema()
+
+    with sqlite3.connect(path) as conn:
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+    assert "routine_completions" in tables
+    os.unlink(path)
+
+
+def test_connect_enables_foreign_keys(temp_db):
+    """db.connect() debe activar PRAGMA foreign_keys=ON."""
+    with db.connect() as conn:
+        cur = conn.execute("PRAGMA foreign_keys")
+        assert cur.fetchone()[0] == 1
+
+
+def test_delete_event_cascades_to_routine_completions(temp_db):
+    """Borrar un evento elimina sus filas de routine_completions."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO events (title, datetime, category, created_at, recurring_rule)
+            VALUES ('Flexiones', '2026-05-19T08:00:00', 'personal', '2026-05-19T08:00:00', 'DAILY')
+            """
+        )
+        event_id = cur.lastrowid
+        conn.execute(
+            """
+            INSERT INTO routine_completions (event_id, completion_date, created_at)
+            VALUES (?, '2026-05-19', '2026-05-19T08:00:00')
+            """,
+            (event_id,),
+        )
+
+    with db.connect() as conn:
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM routine_completions WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()
+    assert rows[0] == 0
+
+
+def test_routine_completions_unique_per_event_per_date(temp_db):
+    """No se puede insertar dos filas con el mismo event_id y completion_date."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO events (title, datetime, category, created_at, recurring_rule)
+            VALUES ('Flexiones', '2026-05-19T08:00:00', 'personal', '2026-05-19T08:00:00', 'DAILY')
+            """
+        )
+        event_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, '2026-05-19', '2026-05-19T08:00:00')",
+            (event_id,),
+        )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, '2026-05-19', '2026-05-19T08:30:00')",
+                (event_id,),
+            )

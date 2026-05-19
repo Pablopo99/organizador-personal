@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at  TEXT NOT NULL,
     done_at     TEXT
 );
+
+CREATE TABLE IF NOT EXISTS routine_completions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id         INTEGER NOT NULL,
+    completion_date  TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    UNIQUE(event_id, completion_date),
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_routine_completions_date
+    ON routine_completions(completion_date);
 """
 
 
@@ -61,11 +73,31 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "done_at" not in tasks_cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN done_at TEXT")
 
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()]
+    if "routine_completions" not in tables:
+        conn.execute("""
+            CREATE TABLE routine_completions (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id         INTEGER NOT NULL,
+                completion_date  TEXT NOT NULL,
+                created_at       TEXT NOT NULL,
+                UNIQUE(event_id, completion_date),
+                FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_routine_completions_date
+                ON routine_completions(completion_date)
+        """)
+
 
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
