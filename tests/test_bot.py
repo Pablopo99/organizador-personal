@@ -222,3 +222,17 @@ def test_semana_prompt_uses_routine_summary():
     prompt = bot._SLASH_PROMPTS["/semana"]
     assert "RUTINAS" in prompt
     assert "routine_summary" in prompt
+
+
+def test_rachas_prompt_registered():
+    prompt = bot._SLASH_PROMPTS["/rachas"]
+    assert "RACHAS" in prompt
+    assert "routine_summary" in prompt
+    assert "current_streak" in prompt
+    assert "best_streak" in prompt
+
+
+def test_rachas_prompt_uses_emoji_and_format():
+    prompt = bot._SLASH_PROMPTS["/rachas"]
+    assert "🔥" in prompt
+    assert "🏆" in prompt

@@ -64,6 +64,17 @@ _SLASH_PROMPTS = {
         "Lista cada uno con ✅ si está done=1 o 🔲 si no. "
         "Una frase de cierre con ánimo. Sin preámbulos."
     ),
+    "/rachas": (
+        "Muestra el estado de las rachas de mis rutinas. SIGUE ESTOS PASOS:\n"
+        "1. Llama a routine_summary(date_from=hoy en YYYY-MM-DD, date_to=hoy en YYYY-MM-DD). Los streaks son globales, el rango no importa.\n"
+        "2. Empieza la respuesta con un título de sección en negrita: 🔥 <b>RACHAS</b>\n"
+        "3. Para cada rutina del paso 1, una línea con formato:\n"
+        "   • {title} — actual: {current_streak} · mejor: {best_streak}\n"
+        "   Si current_streak == best_streak Y best_streak > 0, añade ' 🏆' al final.\n"
+        "4. Cierre motivador opcional de UNA frase si encaja.\n"
+        "5. Si no hay ninguna rutina (lista vacía del paso 1), responde solo: «Aún no tienes rutinas registradas.»\n"
+        "NADA de preámbulos ni preguntas."
+    ),
 }
 
 # Comandos slash que NO van al cerebro (control de bot)
@@ -204,6 +215,7 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("semana", "Resumen de la semana"),
         BotCommand("pendientes", "Tareas pendientes"),
         BotCommand("objetivos", "Objetivos de la semana"),
+        BotCommand("rachas", "Mis rachas"),
         BotCommand("nueva", "Reiniciar conversación"),
     ])
 
@@ -221,7 +233,7 @@ def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(_set_bot_commands).build()
 
     # Slash commands
-    for cmd in ("hoy", "semana", "pendientes", "objetivos"):
+    for cmd in ("hoy", "semana", "pendientes", "objetivos", "rachas"):
         app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
 
     # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)
