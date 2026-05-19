@@ -89,30 +89,6 @@ def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatc
     assert "no puedo procesar" in reply.lower()
 
 
-def test_slash_semana_dispatches_week_summary(monkeypatch):
-    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
-
-    def fake_brain(text, user_id=0):
-        assert "semana" in text.lower()
-        return "ok"
-
-    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
-    reply = bot.process_slash_command("/semana", from_user_id=42)
-    assert reply == "ok"
-
-
-def test_slash_pendientes_dispatches_pending_tasks(monkeypatch):
-    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
-
-    def fake_brain(text, user_id=0):
-        assert "pendientes" in text.lower() or "tareas" in text.lower()
-        return "ok"
-
-    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
-    reply = bot.process_slash_command("/pendientes", from_user_id=42)
-    assert reply == "ok"
-
-
 def test_slash_objetivos_dispatches_objectives(monkeypatch):
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
 
@@ -174,10 +150,6 @@ def test_hoy_no_longer_in_slash_prompts():
     assert "/hoy" not in bot._SLASH_PROMPTS
 
 
-def test_semana_prompt_uses_routine_summary():
-    prompt = bot._SLASH_PROMPTS["/semana"]
-    assert "RUTINAS" in prompt
-    assert "routine_summary" in prompt
 
 
 def test_rachas_prompt_registered():
@@ -194,11 +166,6 @@ def test_rachas_prompt_uses_emoji_and_format():
     assert "🏆" in prompt
 
 
-def test_semana_prompt_mentions_streak_threshold():
-    prompt = bot._SLASH_PROMPTS["/semana"]
-    assert "current_streak" in prompt
-    assert "🔥" in prompt
-    assert "seguidos" in prompt
 
 
 @pytest.fixture
@@ -389,3 +356,82 @@ async def test_callback_edit_failure_sends_new_message(temp_db_for_bot, monkeypa
     await bot._on_callback_query(_make_update_with_callback(query), context)
 
     context.bot.send_message.assert_called_once()
+
+
+def test_pendientes_no_longer_in_slash_prompts():
+    assert "/pendientes" not in bot._SLASH_PROMPTS
+
+
+def test_semana_no_longer_in_slash_prompts():
+    assert "/semana" not in bot._SLASH_PROMPTS
+
+
+@pytest.mark.asyncio
+async def test_callback_mark_objective_in_week_view(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    o = tools.add_objective("Terminar pres", "2026-05-18")
+
+    query = _make_callback_query(f"mO:{o['id']}:W")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row[0] == 1
+    query.edit_message_text.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_callback_unmark_objective_in_week_view(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    o = tools.add_objective("Subir vídeos", "2026-05-18")
+    tools.mark_objective_done(o["id"])
+
+    query = _make_callback_query(f"uO:{o['id']}:W")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_callback_mark_task_in_pending_view(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    t = tools.add_task("comprar pan")
+
+    query = _make_callback_query(f"mT:{t['id']}:P")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done FROM tasks WHERE id = ?", (t["id"],)).fetchone()
+    assert row[0] == 1
+    edit_kwargs = query.edit_message_text.call_args.kwargs
+    text = edit_kwargs.get("text") or query.edit_message_text.call_args.args[0]
+    assert "No tienes tareas pendientes" in text
+
+
+@pytest.mark.asyncio
+async def test_callback_old_format_no_view_suffix_defaults_to_hoy(temp_db_for_bot, monkeypatch):
+    """callback_data sin sufijo de vista (mE:42) se trata como H."""
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+
+    query = _make_callback_query(f"mE:{e['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
+    assert row[0] == 1
+    query.edit_message_text.assert_called_once()

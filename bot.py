@@ -33,24 +33,6 @@ log = logging.getLogger("bot")
 
 # Mapa de comandos slash → frase natural que recibe el cerebro
 _SLASH_PROMPTS = {
-    "/semana": (
-        "Resumen de la semana. SIGUE ESTOS PASOS EN ORDEN:\n"
-        "1. Llama a query_events(date_from=lunes 00:00, date_to=domingo 23:59 de esta semana, include_done=true).\n"
-        "2. Llama a query_objectives(week_start=lunes de esta semana).\n"
-        "3. Llama a list_tasks(include_done=true).\n"
-        "4. Llama a routine_summary(date_from=lunes, date_to=domingo) en formato YYYY-MM-DD — devuelve por cada rutina scheduled_days, completed_days, current_streak y best_streak.\n"
-        "5. Construye estas secciones (OMITE las vacías sin decir nada):\n"
-        "   📅 ESTA SEMANA = eventos del paso 1 SIN recurring_rule y con done=0\n"
-        "   🎯 OBJETIVOS = objetivos del paso 2 (marca con ✅ los done=1, con 🔲 los pendientes)\n"
-        "   🔁 RUTINAS = una línea por rutina del paso 4 con formato base '{title} ({completed_days}/{scheduled_days} días)'. Si current_streak >= 2, añade ' 🔥 {current_streak} seguidos' al final.\n"
-        "   ✅ COMPLETADO = eventos del paso 1 sin recurring_rule con done=1 + tareas del paso 3 cuyo done_at sea de esta semana\n"
-        "6. Cierre motivador opcional de UNA frase si encaja.\n"
-        "NADA de preámbulos ni preguntas."
-    ),
-    "/pendientes": (
-        "Lista mis tareas pendientes (list_tasks con include_done=false) en formato HTML, una por bullet. "
-        "Sin preámbulos. Si la lista está vacía, di solo «No tienes tareas pendientes. 🎉»."
-    ),
     "/objetivos": (
         "Muéstrame el estado de mis objetivos de esta semana. "
         "Llama a query_objectives(week_start=lunes de esta semana). "
@@ -209,6 +191,43 @@ async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _on_pendientes(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/pendientes: lista de tareas pendientes con botón por tarea."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/pendientes ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    with db.connect() as conn:
+        text, keyboard = views.render_pending_view(conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
+async def _on_semana(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/semana: resumen de la semana con botones solo en objetivos."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/semana ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_week_view(today, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 _CALLBACK_ACTIONS = {
     "mE": lambda i: tools.mark_event_done(i),
     "uE": lambda i: tools.unmark_event_done(i),
@@ -216,6 +235,8 @@ _CALLBACK_ACTIONS = {
     "uR": lambda i: tools.uncomplete_routine_today(i),
     "mT": lambda i: tools.complete_task(i),
     "uT": lambda i: tools.uncomplete_task(i),
+    "mO": lambda i: tools.mark_objective_done(i),
+    "uO": lambda i: tools.unmark_objective_done(i),
 }
 
 
@@ -236,12 +257,15 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     action_type = data[:2]
+    parts = data[3:].split(":", 1)
     try:
-        item_id = int(data.split(":", 1)[1])
+        item_id = int(parts[0])
     except ValueError:
         log.warning("callback_data sin id válido: %r", data)
         await query.answer("Acción no reconocida")
         return
+
+    view_letter = parts[1] if len(parts) > 1 else "H"
 
     handler = _CALLBACK_ACTIONS.get(action_type)
     if handler is None:
@@ -256,7 +280,12 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     today = date_utils.today_madrid()
     with db.connect() as conn:
-        text, keyboard = views.render_today_view(today, conn)
+        if view_letter == "P":
+            text, keyboard = views.render_pending_view(conn)
+        elif view_letter == "W":
+            text, keyboard = views.render_week_view(today, conn)
+        else:
+            text, keyboard = views.render_today_view(today, conn)
 
     try:
         await query.edit_message_text(
@@ -311,7 +340,9 @@ def main() -> None:
 
     # Slash commands
     app.add_handler(CommandHandler("hoy", _on_hoy))
-    for cmd in ("semana", "pendientes", "objetivos", "rachas"):
+    app.add_handler(CommandHandler("pendientes", _on_pendientes))
+    app.add_handler(CommandHandler("semana", _on_semana))
+    for cmd in ("objetivos", "rachas"):
         app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
 
     # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)
