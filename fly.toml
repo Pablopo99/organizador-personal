@@ -1,0 +1,19 @@
+app = "mi-secretaria-pablo"
+primary_region = "cdg"
+
+[build]
+
+[env]
+  DB_PATH = "/data/organizador.db"
+
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1
+
+[deploy]
+  strategy = "immediate"

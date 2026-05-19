@@ -27,6 +27,6 @@ ALLOWED_USER_ID = int(_require("ALLOWED_USER_ID"))
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 TIMEZONE = "Europe/Madrid"
-DB_PATH = str(_PROJECT_ROOT / "organizador.db")
+DB_PATH = os.environ.get("DB_PATH") or str(_PROJECT_ROOT / "organizador.db")
 CATEGORIES = ("medical", "work", "personal", "other")
 CLAUDE_MODEL = "claude-sonnet-4-6"
