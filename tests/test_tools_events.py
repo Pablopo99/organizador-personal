@@ -144,3 +144,95 @@ def test_update_event_with_title_keeps_reminder_flags():
             (created["id"],),
         ).fetchone()
     assert row[0] == 1
+
+
+def test_mark_event_done_on_non_recurring_sets_done_flag():
+    """Comportamiento original intacto: evento puntual -> done=1."""
+    created = tools.add_event("Médico", "2026-05-20T10:00:00", "medical")
+
+    result = tools.mark_event_done(created["id"])
+
+    assert result["updated"] == 1
+    assert result.get("already_done_today") is not True
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM events WHERE id = ?", (created["id"],)
+        ).fetchone()
+    assert row[0] == 1
+
+
+def test_mark_event_done_on_recurring_inserts_completion(monkeypatch):
+    """Rutina -> no toca done; inserta en routine_completions con fecha de hoy Madrid."""
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    created = tools.add_event(
+        "Flexiones", "2026-05-19T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+
+    result = tools.mark_event_done(created["id"])
+
+    assert result["event_id"] == created["id"]
+    assert result["completion_date"] == "2026-05-19"
+    assert result.get("already_done_today") is not True
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM events WHERE id = ?", (created["id"],)
+        ).fetchone()
+        assert row[0] == 0
+        rc = conn.execute(
+            "SELECT completion_date FROM routine_completions WHERE event_id = ?",
+            (created["id"],),
+        ).fetchone()
+        assert rc[0] == "2026-05-19"
+
+
+def test_mark_event_done_on_recurring_twice_same_day_idempotent(monkeypatch):
+    """Marcar la misma rutina dos veces el mismo día devuelve already_done_today=True."""
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    created = tools.add_event(
+        "Flexiones", "2026-05-19T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+
+    first = tools.mark_event_done(created["id"])
+    second = tools.mark_event_done(created["id"])
+
+    assert first.get("already_done_today") is not True
+    assert second["already_done_today"] is True
+
+    with db.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM routine_completions WHERE event_id = ?",
+            (created["id"],),
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_mark_event_done_recurring_different_days(monkeypatch):
+    """Marcar la misma rutina dos días distintos sí inserta dos filas."""
+    from datetime import date
+    import date_utils
+    created = tools.add_event(
+        "Flexiones", "2026-05-19T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    tools.mark_event_done(created["id"])
+
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 20))
+    tools.mark_event_done(created["id"])
+
+    with db.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM routine_completions WHERE event_id = ?",
+            (created["id"],),
+        ).fetchone()[0]
+    assert count == 2

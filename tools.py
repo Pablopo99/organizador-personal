@@ -131,11 +131,50 @@ def delete_event(event_id: int) -> dict:
 
 
 def mark_event_done(event_id: int) -> dict:
+    """Marca un evento como hecho.
+
+    Eventos puntuales -> done=1 (permanente).
+    Eventos recurrentes (rutinas) -> inserta fila en routine_completions
+    con la fecha de hoy en Madrid (no toca done).
+    """
+    import sqlite3
+
+    import date_utils
+
     with db.connect() as conn:
+        row = conn.execute(
+            "SELECT recurring_rule FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+        if row is None:
+            return {"id": event_id, "updated": 0}
+
+        if row["recurring_rule"]:
+            today = date_utils.today_madrid().isoformat()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO routine_completions (event_id, completion_date, created_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (event_id, today, date_utils.now_iso()),
+                )
+                return {
+                    "event_id": event_id,
+                    "completion_date": today,
+                    "updated": 1,
+                }
+            except sqlite3.IntegrityError:
+                return {
+                    "event_id": event_id,
+                    "completion_date": today,
+                    "already_done_today": True,
+                    "updated": 0,
+                }
+
         cur = conn.execute(
             "UPDATE events SET done = 1 WHERE id = ?", (event_id,)
         )
-    return {"id": event_id, "updated": cur.rowcount}
+        return {"id": event_id, "updated": cur.rowcount}
 
 
 # ------------------------------------------------------------ objectives ----
