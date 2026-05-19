@@ -236,3 +236,79 @@ def test_mark_event_done_recurring_different_days(monkeypatch):
             (created["id"],),
         ).fetchone()[0]
     assert count == 2
+
+
+def test_query_events_recurring_instance_done_today_reflects_completion():
+    """Una rutina DAILY marcada hoy aparece con done=1 en query_events para hoy."""
+    created = tools.add_event(
+        "Flexiones", "2026-05-19T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, '2026-05-19', '2026-05-19T08:00:00')",
+            (created["id"],),
+        )
+
+    rows = tools.query_events(
+        "2026-05-19T00:00:00", "2026-05-19T23:59:59", include_done=True
+    )
+
+    flex_rows = [r for r in rows if r["title"] == "Flexiones"]
+    assert len(flex_rows) == 1
+    assert flex_rows[0]["done"] == 1
+
+
+def test_query_events_recurring_instance_pending_when_no_completion():
+    """Una rutina DAILY sin completar hoy aparece con done=0."""
+    tools.add_event(
+        "Flexiones", "2026-05-19T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+
+    rows = tools.query_events(
+        "2026-05-19T00:00:00", "2026-05-19T23:59:59", include_done=True
+    )
+
+    flex_rows = [r for r in rows if r["title"] == "Flexiones"]
+    assert len(flex_rows) == 1
+    assert flex_rows[0]["done"] == 0
+
+
+def test_query_events_recurring_each_instance_independent():
+    """Marcar el 19 no afecta a la instancia del 20."""
+    created = tools.add_event(
+        "Flexiones", "2026-05-19T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, '2026-05-19', '2026-05-19T08:00:00')",
+            (created["id"],),
+        )
+
+    rows = tools.query_events(
+        "2026-05-19T00:00:00", "2026-05-21T23:59:59", include_done=True
+    )
+
+    flex_rows = sorted(
+        [r for r in rows if r["title"] == "Flexiones"],
+        key=lambda r: r["datetime"],
+    )
+    assert len(flex_rows) == 3
+    assert flex_rows[0]["done"] == 1
+    assert flex_rows[1]["done"] == 0
+    assert flex_rows[2]["done"] == 0
+
+
+def test_query_events_non_recurring_done_unchanged():
+    """Eventos puntuales mantienen su .done original."""
+    created = tools.add_event("Médico", "2026-05-19T10:00:00", "medical")
+    tools.mark_event_done(created["id"])
+
+    rows = tools.query_events(
+        "2026-05-19T00:00:00", "2026-05-19T23:59:59", include_done=True
+    )
+
+    med = [r for r in rows if r["title"] == "Médico"][0]
+    assert med["done"] == 1

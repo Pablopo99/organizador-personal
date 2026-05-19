@@ -56,21 +56,27 @@ def query_events(
             params.append(category)
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
-    occurrences: list[dict] = []
-    for row in rows:
-        rule = row.get("recurring_rule")
-        if not rule:
-            row_dt = datetime.fromisoformat(row["datetime"])
-            if dt_from <= row_dt <= dt_to:
-                occurrences.append(row)
-        else:
-            occurrences.extend(_expand_recurring(row, rule, dt_from, dt_to))
+        occurrences: list[dict] = []
+        for row in rows:
+            rule = row.get("recurring_rule")
+            if not rule:
+                row_dt = datetime.fromisoformat(row["datetime"])
+                if dt_from <= row_dt <= dt_to:
+                    occurrences.append(row)
+            else:
+                occurrences.extend(_expand_recurring(row, rule, dt_from, dt_to, conn))
 
     occurrences.sort(key=lambda r: r["datetime"])
     return occurrences
 
 
-def _expand_recurring(row: dict, rule: str, dt_from: datetime, dt_to: datetime) -> list[dict]:
+def _expand_recurring(
+    row: dict,
+    rule: str,
+    dt_from: datetime,
+    dt_to: datetime,
+    conn,
+) -> list[dict]:
     base_dt = datetime.fromisoformat(row["datetime"])
     results: list[dict] = []
 
@@ -93,6 +99,14 @@ def _expand_recurring(row: dict, rule: str, dt_from: datetime, dt_to: datetime) 
     while cur_dt <= dt_to:
         clone = dict(row)
         clone["datetime"] = cur_dt.isoformat()
+        completion = conn.execute(
+            """
+            SELECT 1 FROM routine_completions
+            WHERE event_id = ? AND completion_date = ?
+            """,
+            (row["id"], cur_dt.date().isoformat()),
+        ).fetchone()
+        clone["done"] = 1 if completion else 0
         results.append(clone)
         cur_dt += step
     return results
