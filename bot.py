@@ -14,8 +14,11 @@ from telegram.ext import (
 )
 
 import brain
+import date_utils
 import db
+import tools
 import transcriber
+import views
 from config import ALLOWED_USER_ID, TELEGRAM_TOKEN
 from formatting import markdown_to_html
 
@@ -28,19 +31,6 @@ log = logging.getLogger("bot")
 
 # Mapa de comandos slash → frase natural que recibe el cerebro
 _SLASH_PROMPTS = {
-    "/hoy": (
-        "Resumen de hoy. SIGUE ESTOS PASOS EN ORDEN:\n"
-        "1. Llama a query_events(date_from=hoy 00:00, date_to=hoy 23:59, include_done=true) — devuelve TODOS los eventos de hoy, incluyendo instancias de rutinas con done por instancia.\n"
-        "2. Llama a list_tasks(include_done=true) — devuelve TODAS las tareas.\n"
-        "3. Llama a routine_summary(date_from=hoy YYYY-MM-DD, date_to=hoy YYYY-MM-DD) — devuelve current_streak por rutina.\n"
-        "4. Construye estas secciones (OMITE las vacías sin decir nada):\n"
-        "   📅 HOY = eventos del paso 1 SIN recurring_rule y con done=0\n"
-        "   🔁 RUTINAS = eventos del paso 1 CON recurring_rule. Si done=1 → título en <s>...</s>. Sin horas. Si la rutina (matching event_id en routine_summary) tiene current_streak >= 2, añade ' 🔥 N' al final del bullet (N = current_streak).\n"
-        "   📝 PENDIENTES = tareas del paso 2 con done=0\n"
-        "   ✅ COMPLETADO HOY = eventos del paso 1 sin recurring_rule con done=1 + eventos del paso 1 con recurring_rule y done=1 (rutinas hechas hoy, tachadas) + tareas del paso 2 cuyo done_at sea de hoy\n"
-        "5. Cierre motivador opcional de UNA frase si encaja.\n"
-        "NADA de preámbulos, notas o preguntas."
-    ),
     "/semana": (
         "Resumen de la semana. SIGUE ESTOS PASOS EN ORDEN:\n"
         "1. Llama a query_events(date_from=lunes 00:00, date_to=domingo 23:59 de esta semana, include_done=true).\n"
@@ -198,6 +188,25 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
 
 
+async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/hoy: vista generada por views.render_today_view (sin Claude)."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/hoy ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_today_view(today, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 def _make_slash_handler(command: str):
     """Factory: crea un handler async para un comando slash conocido."""
     async def handler(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -234,7 +243,8 @@ def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(_set_bot_commands).build()
 
     # Slash commands
-    for cmd in ("hoy", "semana", "pendientes", "objetivos", "rachas"):
+    app.add_handler(CommandHandler("hoy", _on_hoy))
+    for cmd in ("semana", "pendientes", "objetivos", "rachas"):
         app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
 
     # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)

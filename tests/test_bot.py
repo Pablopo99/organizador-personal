@@ -87,25 +87,6 @@ def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatc
     assert "no puedo procesar" in reply.lower()
 
 
-def test_slash_hoy_dispatches_summary_text(monkeypatch):
-    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
-    captured = {}
-
-    def fake_brain(text, user_id=0):
-        captured["text"] = text
-        captured["user_id"] = user_id
-        return "respuesta"
-
-    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
-
-    reply = bot.process_slash_command("/hoy", from_user_id=42)
-    assert reply == "respuesta"
-    assert "hoy" in captured["text"].lower()
-    # Ahora el prompt incluye sección de completado
-    assert "completado" in captured["text"].lower()
-    assert captured["user_id"] == 42
-
-
 def test_slash_semana_dispatches_week_summary(monkeypatch):
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
 
@@ -176,16 +157,6 @@ def test_markdown_to_html_helper_leaves_plain_text_alone():
     assert bot.markdown_to_html("texto sin formato") == "texto sin formato"
 
 
-def test_markdown_bold_converted_in_slash_command(monkeypatch):
-    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
-    monkeypatch.setattr(bot.brain, "handle_message",
-                        lambda text, user_id=0: "Sección **HOY**")
-
-    reply = bot.process_slash_command("/hoy", from_user_id=42)
-    assert "<b>HOY</b>" in reply
-    assert "**" not in reply
-
-
 def test_markdown_bold_converted_in_voice_transcription(monkeypatch):
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
     monkeypatch.setattr(bot.brain, "handle_message",
@@ -196,26 +167,9 @@ def test_markdown_bold_converted_in_voice_transcription(monkeypatch):
     assert "**listo**" not in reply
 
 
-def test_process_incoming_routes_known_slash_to_command_handler(monkeypatch):
-    """process_incoming debe enrutar /hoy al handler de comandos, no al cerebro con '/hoy' literal."""
-    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
-    called = {}
-
-    def fake_brain(text, user_id=0):
-        called["brain"] = text
-        return "from brain"
-
-    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
-
-    reply = bot.process_incoming(text="/hoy", from_user_id=42)
-    assert "/hoy" not in called["brain"]
-    assert reply == "from brain"
-
-
-def test_hoy_prompt_mentions_rutinas_section():
-    prompt = bot._SLASH_PROMPTS["/hoy"]
-    assert "RUTINAS" in prompt
-    assert "query_events" in prompt
+def test_hoy_no_longer_in_slash_prompts():
+    """/hoy ya no se procesa via Claude — tiene handler dedicado."""
+    assert "/hoy" not in bot._SLASH_PROMPTS
 
 
 def test_semana_prompt_uses_routine_summary():
@@ -236,12 +190,6 @@ def test_rachas_prompt_uses_emoji_and_format():
     prompt = bot._SLASH_PROMPTS["/rachas"]
     assert "🔥" in prompt
     assert "🏆" in prompt
-
-
-def test_hoy_prompt_mentions_streak_threshold():
-    prompt = bot._SLASH_PROMPTS["/hoy"]
-    assert "current_streak" in prompt
-    assert "🔥" in prompt
 
 
 def test_semana_prompt_mentions_streak_threshold():
