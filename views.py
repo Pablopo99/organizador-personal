@@ -99,3 +99,22 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
 
     keyboard = InlineKeyboardMarkup(buttons)
     return text, keyboard
+
+
+def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /pendientes: una tarea por línea, un botón por tarea."""
+    tasks_all = tools.list_tasks(include_done=False)
+
+    if not tasks_all:
+        return "No tienes tareas pendientes. 🎉", None
+
+    lines = [f"• {t['text']}" for t in tasks_all]
+    text = "📝 <b>PENDIENTES</b>\n\n" + "\n".join(lines)
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for t in tasks_all:
+        buttons.append([InlineKeyboardButton(
+            f"🔲 {t['text']}", callback_data=f"mT:{t['id']}:P"
+        )])
+
+    return text, InlineKeyboardMarkup(buttons)

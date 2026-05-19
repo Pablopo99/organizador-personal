@@ -152,6 +152,49 @@ def test_render_task_done_yesterday_not_shown(monkeypatch):
                 assert "comprar pan" not in btn.text
 
 
+def test_render_pending_view_empty_returns_celebration():
+    with db.connect() as conn:
+        text, keyboard = views.render_pending_view(conn)
+
+    assert "No tienes tareas pendientes" in text
+    assert "🎉" in text
+    assert keyboard is None
+
+
+def test_render_pending_view_lists_tasks_with_buttons():
+    t1 = tools.add_task("Solucionar Spotify")
+    t2 = tools.add_task("Comprar pan")
+
+    with db.connect() as conn:
+        text, keyboard = views.render_pending_view(conn)
+
+    assert "PENDIENTES" in text
+    assert "Solucionar Spotify" in text
+    assert "Comprar pan" in text
+    assert keyboard is not None
+    assert len(keyboard.inline_keyboard) == 2
+
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"mT:{t1['id']}:P" in datas
+    assert f"mT:{t2['id']}:P" in datas
+
+    for row in keyboard.inline_keyboard:
+        assert row[0].text.startswith("🔲")
+
+
+def test_render_pending_view_skips_done_tasks():
+    t = tools.add_task("Ya hecha")
+    tools.complete_task(t["id"])
+    tools.add_task("Pendiente")
+
+    with db.connect() as conn:
+        text, keyboard = views.render_pending_view(conn)
+
+    assert "Ya hecha" not in text
+    assert "Pendiente" in text
+    assert len(keyboard.inline_keyboard) == 1
+
+
 def test_render_full_mix_keyboard_order():
     """Orden: pendientes primero (events, rutinas, tareas), luego completados."""
     tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
