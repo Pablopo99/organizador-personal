@@ -525,6 +525,76 @@ def test_best_streak_single_completion_returns_one():
     assert best == 1
 
 
+def test_unmark_event_done_sets_done_zero():
+    e = tools.add_event("Médico", "2026-05-20T10:00:00", "medical")
+    tools.mark_event_done(e["id"])
+
+    tools.unmark_event_done(e["id"])
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
+    assert row[0] == 0
+
+
+def test_unmark_event_done_idempotent_on_unmarked():
+    e = tools.add_event("Médico", "2026-05-20T10:00:00", "medical")
+    tools.unmark_event_done(e["id"])
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
+    assert row[0] == 0
+
+
+def test_uncomplete_routine_today_removes_today_completion(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    e = tools.add_event("Flexiones", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+    tools.mark_event_done(e["id"])
+
+    tools.uncomplete_routine_today(e["id"])
+
+    with db.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM routine_completions WHERE event_id = ? AND completion_date = ?",
+            (e["id"], "2026-05-19"),
+        ).fetchone()[0]
+    assert count == 0
+
+
+def test_uncomplete_routine_today_preserves_other_days(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    e = tools.add_event("Flexiones", "2026-05-17T08:00:00", "personal", recurring_rule="DAILY")
+    with db.connect() as conn:
+        for d in ("2026-05-17", "2026-05-18", "2026-05-19"):
+            conn.execute(
+                "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, ?, ?)",
+                (e["id"], d, "2026-05-19T08:00:00"),
+            )
+
+    tools.uncomplete_routine_today(e["id"])
+
+    with db.connect() as conn:
+        dates = [r[0] for r in conn.execute(
+            "SELECT completion_date FROM routine_completions WHERE event_id = ? ORDER BY completion_date",
+            (e["id"],),
+        ).fetchall()]
+    assert dates == ["2026-05-17", "2026-05-18"]
+
+
+def test_uncomplete_routine_today_idempotent_when_not_completed(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    e = tools.add_event("Flexiones", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+    tools.uncomplete_routine_today(e["id"])  # no debería fallar
+
+
 def test_routine_summary_includes_current_streak(monkeypatch):
     from datetime import date
     import date_utils

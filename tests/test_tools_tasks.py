@@ -59,3 +59,28 @@ def test_pending_task_has_no_done_at():
     target = next(r for r in rows if r["id"] == a["id"])
     assert target["done"] == 0
     assert target["done_at"] is None
+
+
+def test_uncomplete_task_resets_done_and_done_at():
+    t = tools.add_task("comprar pan")
+    tools.complete_task(t["id"])
+
+    tools.uncomplete_task(t["id"])
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, done_at FROM tasks WHERE id = ?", (t["id"],)
+        ).fetchone()
+    assert row[0] == 0
+    assert row[1] is None
+
+
+def test_uncomplete_task_idempotent_when_pending():
+    t = tools.add_task("comprar pan")
+    tools.uncomplete_task(t["id"])
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM tasks WHERE id = ?", (t["id"],)
+        ).fetchone()
+    assert row[0] == 0

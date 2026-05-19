@@ -191,6 +191,27 @@ def mark_event_done(event_id: int) -> dict:
         return {"id": event_id, "updated": cur.rowcount}
 
 
+def unmark_event_done(event_id: int) -> dict:
+    """Quita el done=1 de un evento puntual (no-op para recurrentes)."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE events SET done = 0 WHERE id = ?", (event_id,)
+        )
+    return {"id": event_id, "updated": cur.rowcount}
+
+
+def uncomplete_routine_today(event_id: int) -> dict:
+    """Borra la completion de hoy (Madrid) para una rutina."""
+    import date_utils
+    today = date_utils.today_madrid().isoformat()
+    with db.connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM routine_completions WHERE event_id = ? AND completion_date = ?",
+            (event_id, today),
+        )
+    return {"event_id": event_id, "completion_date": today, "deleted": cur.rowcount}
+
+
 def _completion_dates(event_id: int, conn) -> list:
     """Devuelve las fechas de completion como objetos date, ordenadas asc."""
     rows = conn.execute(
@@ -423,6 +444,16 @@ def complete_task(task_id: int) -> dict:
         cur = conn.execute(
             "UPDATE tasks SET done = 1, done_at = ? WHERE id = ?",
             (now_iso(), task_id),
+        )
+    return {"id": task_id, "updated": cur.rowcount}
+
+
+def uncomplete_task(task_id: int) -> dict:
+    """Desmarca una tarea: done=0, done_at=NULL."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE tasks SET done = 0, done_at = NULL WHERE id = ?",
+            (task_id,),
         )
     return {"id": task_id, "updated": cur.rowcount}
 
