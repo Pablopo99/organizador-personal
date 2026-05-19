@@ -236,3 +236,16 @@ def test_rachas_prompt_uses_emoji_and_format():
     prompt = bot._SLASH_PROMPTS["/rachas"]
     assert "🔥" in prompt
     assert "🏆" in prompt
+
+
+def test_hoy_prompt_mentions_streak_threshold():
+    prompt = bot._SLASH_PROMPTS["/hoy"]
+    assert "current_streak" in prompt
+    assert "🔥" in prompt
+
+
+def test_semana_prompt_mentions_streak_threshold():
+    prompt = bot._SLASH_PROMPTS["/semana"]
+    assert "current_streak" in prompt
+    assert "🔥" in prompt
+    assert "seguidos" in prompt

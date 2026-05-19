@@ -74,7 +74,7 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 
 🔁 <b>RUTINAS</b>
 
-• 50 flexiones diarias
+• 50 flexiones diarias 🔥 3
 • Leer 5 páginas
 • Anotar 3 cosas buenas del día
 
@@ -100,6 +100,7 @@ REGLAS ESTRICTAS DE FORMATO para resúmenes (cuando viene de /hoy, /semana, /pen
 5. Empieza DIRECTAMENTE con la primera sección que tenga contenido. NO pongas preámbulos como "Aquí va tu resumen:" ni saludos.
 6. El cierre motivador es opcional — solo una frase si encaja naturalmente.
 7. RUTINAS son eventos con recurring_rule no nulo. En la sección RUTINAS NO muestres horas — solo el título. Si la instancia ya está hecha (done=1 en query_events para esa fila), envuelve el título en <s>...</s> y añádelo también a COMPLETADO HOY. Si no hay rutinas que toquen el día/rango, OMITE la sección por completo.
+8. Si una rutina tiene current_streak >= 2 (campo de routine_summary), añade ' 🔥 N' al final del bullet en /hoy (N = current_streak) o ' 🔥 N seguidos' en /semana. Si es 0 o 1, NO muestres 🔥. Si la rutina aparece tachada porque ya está hecha hoy, mantén el 🔥 también dentro del <s>...</s>.
 
 CÓMO IDENTIFICAR LO COMPLETADO:
 - "Completado hoy" para EVENTOS: eventos cuya datetime sea de hoy Y tengan done=1. Obtenlos con query_events(today_start, today_end, include_done=true) y filtra a los que tengan done=1.

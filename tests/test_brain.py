@@ -152,3 +152,8 @@ def test_system_prompt_includes_rutinas_section():
     prompt = brain._system_prompt()
     assert "🔁" in prompt
     assert "RUTINAS" in prompt
+
+
+def test_system_prompt_mentions_streak_emoji():
+    prompt = brain._system_prompt()
+    assert "🔥" in prompt
