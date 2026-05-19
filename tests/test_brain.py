@@ -146,3 +146,9 @@ def test_system_prompt_preserves_critical_rules():
     assert "consulta" in lower or "consúltala" in lower
     assert "borrar" in lower
     assert "confirma" in lower or "confirmaci" in lower
+
+
+def test_system_prompt_includes_rutinas_section():
+    prompt = brain._system_prompt()
+    assert "🔁" in prompt
+    assert "RUTINAS" in prompt

@@ -242,3 +242,9 @@ async def test_check_reminders_event_outside_window(monkeypatch):
     await scheduler.check_reminders(_fake_context(send_mock))
 
     send_mock.assert_not_called()
+
+
+def test_morning_prompt_includes_rutinas_section():
+    prompt = scheduler._morning_prompt()
+    assert "🔁" in prompt
+    assert "RUTINAS" in prompt

@@ -210,3 +210,15 @@ def test_process_incoming_routes_known_slash_to_command_handler(monkeypatch):
     reply = bot.process_incoming(text="/hoy", from_user_id=42)
     assert "/hoy" not in called["brain"]
     assert reply == "from brain"
+
+
+def test_hoy_prompt_mentions_rutinas_section():
+    prompt = bot._SLASH_PROMPTS["/hoy"]
+    assert "RUTINAS" in prompt
+    assert "query_events" in prompt
+
+
+def test_semana_prompt_uses_routine_summary():
+    prompt = bot._SLASH_PROMPTS["/semana"]
+    assert "RUTINAS" in prompt
+    assert "routine_summary" in prompt

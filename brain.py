@@ -72,6 +72,12 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 • 09:00 — Reunión equipo
 • 17:00 — Cita médico
 
+🔁 <b>RUTINAS</b>
+
+• 50 flexiones diarias
+• Leer 5 páginas
+• Anotar 3 cosas buenas del día
+
 📝 <b>PENDIENTES</b>
 
 • Comprar pan
@@ -80,6 +86,7 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 ✅ <b>COMPLETADO HOY</b>
 
 • <s>Reunión equipo (09:00)</s>
+• <s>50 flexiones diarias</s>
 • <s>Comprar leche</s>
 
 💪 [Cierre motivador opcional, 1 frase. Si he completado cosas, celébralo brevemente.]
@@ -92,11 +99,13 @@ REGLAS ESTRICTAS DE FORMATO para resúmenes (cuando viene de /hoy, /semana, /pen
 4. NUNCA añadas comentarios meta sobre los datos ("la tarea X está marcada pero sin fecha", "podríamos mejorar esto"). Si un dato no encaja, simplemente no lo incluyas.
 5. Empieza DIRECTAMENTE con la primera sección que tenga contenido. NO pongas preámbulos como "Aquí va tu resumen:" ni saludos.
 6. El cierre motivador es opcional — solo una frase si encaja naturalmente.
+7. RUTINAS son eventos con recurring_rule no nulo. En la sección RUTINAS NO muestres horas — solo el título. Si la instancia ya está hecha (done=1 en query_events para esa fila), envuelve el título en <s>...</s> y añádelo también a COMPLETADO HOY. Si no hay rutinas que toquen el día/rango, OMITE la sección por completo.
 
 CÓMO IDENTIFICAR LO COMPLETADO:
 - "Completado hoy" para EVENTOS: eventos cuya datetime sea de hoy Y tengan done=1. Obtenlos con query_events(today_start, today_end, include_done=true) y filtra a los que tengan done=1.
 - "Completado hoy" para TAREAS: tareas con done=1 cuyo done_at esté en el rango de hoy. Obtenlas con list_tasks(include_done=true) y filtra por done_at. Las tareas con done=1 pero done_at=null (residuo de antes) NO se incluyen, las ignoras sin comentar.
 - "Completado esta semana" análogo, ampliando al rango lunes-domingo de la semana actual.
+- "Completado hoy" para RUTINAS: instancias recurrentes devueltas por query_events para hoy cuyo done=1. (Mecánica interna: hay una fila en routine_completions para esa fecha; tú solo lees done.)
 
 Puedes llamar varias herramientas en un mismo turno si la petición lo requiere. Si una herramienta devuelve error, explícalo con palabras claras y propón una alternativa."""
 

@@ -33,9 +33,10 @@ def _morning_prompt() -> str:
         "1. Llama a query_events(date_from=hoy 00:00, date_to=hoy 23:59, include_done=true).\n"
         "2. Llama a list_tasks(include_done=true).\n"
         "3. Construye las secciones (OMITE las vacías sin decir nada):\n"
-        "   📅 HOY = eventos del paso 1 con done=0\n"
+        "   📅 HOY = eventos del paso 1 SIN recurring_rule y con done=0\n"
+        "   🔁 RUTINAS = eventos del paso 1 CON recurring_rule. Si done=1 → título en <s>...</s>. Sin horas.\n"
         "   📝 PENDIENTES = tareas del paso 2 con done=0\n"
-        "   ✅ COMPLETADO HOY = eventos del paso 1 con done=1 + tareas del paso 2 con done_at de hoy\n"
+        "   ✅ COMPLETADO HOY = eventos del paso 1 sin recurring_rule con done=1 + eventos del paso 1 con recurring_rule y done=1 + tareas del paso 2 con done_at de hoy\n"
         "4. Si no hay nada en ninguna sección, di solo que puede disfrutar del día libre.\n"
         "5. Cierra con una frase motivadora breve si encaja."
     )

@@ -30,12 +30,13 @@ log = logging.getLogger("bot")
 _SLASH_PROMPTS = {
     "/hoy": (
         "Resumen de hoy. SIGUE ESTOS PASOS EN ORDEN:\n"
-        "1. Llama a query_events(date_from=hoy 00:00, date_to=hoy 23:59, include_done=true) — devuelve TODOS los eventos de hoy.\n"
+        "1. Llama a query_events(date_from=hoy 00:00, date_to=hoy 23:59, include_done=true) — devuelve TODOS los eventos de hoy, incluyendo instancias de rutinas con done por instancia.\n"
         "2. Llama a list_tasks(include_done=true) — devuelve TODAS las tareas.\n"
         "3. Construye estas secciones (OMITE las vacías sin decir nada):\n"
-        "   📅 HOY = eventos del paso 1 con done=0\n"
+        "   📅 HOY = eventos del paso 1 SIN recurring_rule y con done=0\n"
+        "   🔁 RUTINAS = eventos del paso 1 CON recurring_rule. Si done=1 → título en <s>...</s>. Sin horas.\n"
         "   📝 PENDIENTES = tareas del paso 2 con done=0\n"
-        "   ✅ COMPLETADO HOY = eventos del paso 1 con done=1 + tareas del paso 2 cuyo done_at sea de hoy\n"
+        "   ✅ COMPLETADO HOY = eventos del paso 1 sin recurring_rule con done=1 + eventos del paso 1 con recurring_rule y done=1 (rutinas hechas hoy, tachadas) + tareas del paso 2 cuyo done_at sea de hoy\n"
         "4. Cierre motivador opcional de UNA frase si encaja.\n"
         "NADA de preámbulos, notas o preguntas."
     ),
@@ -44,11 +45,13 @@ _SLASH_PROMPTS = {
         "1. Llama a query_events(date_from=lunes 00:00, date_to=domingo 23:59 de esta semana, include_done=true).\n"
         "2. Llama a query_objectives(week_start=lunes de esta semana).\n"
         "3. Llama a list_tasks(include_done=true).\n"
-        "4. Construye estas secciones (OMITE las vacías sin decir nada):\n"
-        "   📅 ESTA SEMANA = eventos del paso 1 con done=0\n"
-        "   🎯 OBJETIVOS = objetivos del paso 2 (marca con ✅ los done=1)\n"
-        "   ✅ COMPLETADO = eventos del paso 1 con done=1 + tareas del paso 3 cuyo done_at sea de esta semana\n"
-        "5. Cierre motivador opcional de UNA frase si encaja.\n"
+        "4. Llama a routine_summary(date_from=lunes, date_to=domingo) en formato YYYY-MM-DD — devuelve por cada rutina scheduled_days y completed_days.\n"
+        "5. Construye estas secciones (OMITE las vacías sin decir nada):\n"
+        "   📅 ESTA SEMANA = eventos del paso 1 SIN recurring_rule y con done=0\n"
+        "   🎯 OBJETIVOS = objetivos del paso 2 (marca con ✅ los done=1, con 🔲 los pendientes)\n"
+        "   🔁 RUTINAS = una línea por rutina del paso 4 con formato '{title} ({completed_days}/{scheduled_days} días)'\n"
+        "   ✅ COMPLETADO = eventos del paso 1 sin recurring_rule con done=1 + tareas del paso 3 cuyo done_at sea de esta semana\n"
+        "6. Cierre motivador opcional de UNA frase si encaja.\n"
         "NADA de preámbulos ni preguntas."
     ),
     "/pendientes": (
