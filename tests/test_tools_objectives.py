@@ -47,3 +47,27 @@ def test_mark_objective_done():
     tools.mark_objective_done(res["id"])
     rows = tools.query_objectives("2026-05-11")
     assert rows[0]["done"] == 1
+
+
+def test_unmark_objective_done_sets_done_zero():
+    o = tools.add_objective("Terminar pres", "2026-05-18")
+    tools.mark_objective_done(o["id"])
+
+    tools.unmark_objective_done(o["id"])
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row[0] == 0
+
+
+def test_unmark_objective_done_idempotent():
+    o = tools.add_objective("Terminar pres", "2026-05-18")
+    tools.unmark_objective_done(o["id"])
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row[0] == 0

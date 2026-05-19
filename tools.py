@@ -414,6 +414,15 @@ def mark_objective_done(objective_id: int) -> dict:
     return {"id": objective_id, "updated": cur.rowcount}
 
 
+def unmark_objective_done(objective_id: int) -> dict:
+    """Desmarca un objetivo: done=0. Uso interno (callback de /semana)."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE objectives SET done = 0 WHERE id = ?", (objective_id,)
+        )
+    return {"id": objective_id, "updated": cur.rowcount}
+
+
 # ----------------------------------------------------------------- tasks ----
 
 def add_task(text: str) -> dict:
