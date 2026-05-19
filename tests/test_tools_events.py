@@ -523,3 +523,57 @@ def test_best_streak_single_completion_returns_one():
     with db.connect() as conn:
         best = tools._best_streak(e["id"], "DAILY", conn)
     assert best == 1
+
+
+def test_routine_summary_includes_current_streak(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    e = tools.add_event("F", "2026-05-17T08:00:00", "personal", recurring_rule="DAILY")
+    for d in ("2026-05-17", "2026-05-18", "2026-05-19"):
+        _insert_completion(e["id"], d)
+
+    summary = tools.routine_summary("2026-05-18", "2026-05-24")
+    flex = [r for r in summary if r["title"] == "F"][0]
+    assert flex["current_streak"] == 3
+
+
+def test_routine_summary_includes_best_streak(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    e = tools.add_event("F", "2026-05-01T08:00:00", "personal", recurring_rule="DAILY")
+    for d in ("2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"):
+        _insert_completion(e["id"], d)
+
+    summary = tools.routine_summary("2026-05-19", "2026-05-19")
+    flex = [r for r in summary if r["title"] == "F"][0]
+    assert flex["best_streak"] == 5
+
+
+def test_routine_summary_streak_alive_when_today_pending(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    e = tools.add_event("F", "2026-05-17T08:00:00", "personal", recurring_rule="DAILY")
+    for d in ("2026-05-17", "2026-05-18"):
+        _insert_completion(e["id"], d)
+
+    summary = tools.routine_summary("2026-05-19", "2026-05-19")
+    flex = [r for r in summary if r["title"] == "F"][0]
+    assert flex["current_streak"] == 2
+
+
+def test_routine_summary_no_completions_zero_streaks(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    tools.add_event("F", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+    summary = tools.routine_summary("2026-05-19", "2026-05-19")
+    flex = [r for r in summary if r["title"] == "F"][0]
+    assert flex["current_streak"] == 0
+    assert flex["best_streak"] == 0

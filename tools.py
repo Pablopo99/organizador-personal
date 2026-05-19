@@ -283,16 +283,20 @@ def _best_streak(event_id: int, rule: str, conn) -> int:
 def routine_summary(date_from: str, date_to: str) -> list[dict]:
     """Resumen agregado de rutinas (eventos recurrentes) para un rango de fechas.
 
-    Devuelve una fila por rutina con cuántos días tocaba (scheduled_days)
-    y cuántos se completaron (completed_days) dentro del rango inclusivo.
+    Devuelve una fila por rutina con cuántos días tocaba (scheduled_days),
+    cuántos se completaron (completed_days) y los streaks actual/mejor.
 
-    Formato fechas: 'YYYY-MM-DD'.
+    Formato fechas: 'YYYY-MM-DD'. El rango es inclusivo por ambos extremos.
+    Los streaks son GLOBALES (no dependen del rango).
     """
+    import date_utils
+
     start = date.fromisoformat(date_from)
     end = date.fromisoformat(date_to)
     if end < start:
         return []
 
+    today = date_utils.today_madrid()
     results: list[dict] = []
     with db.connect() as conn:
         rows = conn.execute(
@@ -313,6 +317,8 @@ def routine_summary(date_from: str, date_to: str) -> list[dict]:
                 """,
                 (row["id"], date_from, date_to),
             ).fetchone()[0]
+            current = _current_streak(row["id"], rule, today, conn)
+            best = _best_streak(row["id"], rule, conn)
             results.append({
                 "event_id": row["id"],
                 "title": row["title"],
@@ -320,6 +326,8 @@ def routine_summary(date_from: str, date_to: str) -> list[dict]:
                 "recurring_rule": rule,
                 "scheduled_days": scheduled,
                 "completed_days": completed,
+                "current_streak": current,
+                "best_streak": best,
             })
     return results
 
