@@ -6,6 +6,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+ENV TZ=Europe/Madrid
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && ln -fs /usr/share/zoneinfo/Europe/Madrid /etc/localtime \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 

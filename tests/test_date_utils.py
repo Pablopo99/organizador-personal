@@ -1,4 +1,7 @@
 from datetime import date, datetime
+from unittest.mock import patch
+
+import pytz
 
 import date_utils
 
@@ -27,3 +30,26 @@ def test_format_human_es():
     assert "22" in s
     assert "may" in s.lower()
     assert "17:00" in s
+
+
+def test_today_madrid_returns_madrid_date_when_utc_is_previous_day():
+    """A las 23:30 UTC del 19, en Madrid son las 01:30 del 20 (verano, UTC+2)."""
+    fake_now = datetime(2026, 7, 19, 23, 30, tzinfo=pytz.UTC)
+    with patch.object(date_utils, "_now_utc", return_value=fake_now):
+        assert date_utils.today_madrid() == date(2026, 7, 20)
+
+
+def test_today_madrid_returns_today_when_within_same_day():
+    """A las 12:00 UTC, en Madrid son las 14:00 — mismo día."""
+    fake_now = datetime(2026, 7, 19, 12, 0, tzinfo=pytz.UTC)
+    with patch.object(date_utils, "_now_utc", return_value=fake_now):
+        assert date_utils.today_madrid() == date(2026, 7, 19)
+
+
+def test_now_madrid_naive_returns_madrid_wallclock_as_naive():
+    fake_now = datetime(2026, 7, 19, 12, 0, tzinfo=pytz.UTC)
+    with patch.object(date_utils, "_now_utc", return_value=fake_now):
+        result = date_utils.now_madrid_naive()
+        assert result.tzinfo is None
+        assert result.hour == 14  # UTC 12:00 + verano = 14:00 Madrid
+        assert result.day == 19
