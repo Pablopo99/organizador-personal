@@ -191,6 +191,95 @@ def mark_event_done(event_id: int) -> dict:
         return {"id": event_id, "updated": cur.rowcount}
 
 
+def _completion_dates(event_id: int, conn) -> list:
+    """Devuelve las fechas de completion como objetos date, ordenadas asc."""
+    rows = conn.execute(
+        "SELECT completion_date FROM routine_completions WHERE event_id = ? ORDER BY completion_date ASC",
+        (event_id,),
+    ).fetchall()
+    return [date.fromisoformat(r["completion_date"]) for r in rows]
+
+
+def _previous_expected_date(rule: str, ref: date) -> Optional[date]:
+    """Última fecha esperada estrictamente anterior a ref para la regla dada."""
+    if rule == "DAILY":
+        return ref - timedelta(days=1)
+    if rule.startswith("WEEKLY:"):
+        code = rule.split(":", 1)[1]
+        if code not in _WEEKDAY_MAP:
+            return None
+        target = _WEEKDAY_MAP[code]
+        d = ref - timedelta(days=1)
+        while d.weekday() != target:
+            d -= timedelta(days=1)
+        return d
+    return None
+
+
+def _most_recent_expected_date(rule: str, today: date) -> Optional[date]:
+    """Fecha esperada más reciente <= today.
+
+    Para DAILY siempre es today. Para WEEKLY:X es today si today.weekday()==X,
+    si no el último weekday X anterior.
+    """
+    if rule == "DAILY":
+        return today
+    if rule.startswith("WEEKLY:"):
+        code = rule.split(":", 1)[1]
+        if code not in _WEEKDAY_MAP:
+            return None
+        target = _WEEKDAY_MAP[code]
+        d = today
+        while d.weekday() != target:
+            d -= timedelta(days=1)
+        return d
+    return None
+
+
+def _current_streak(event_id: int, rule: str, today: date, conn) -> int:
+    """Racha actual hacia atrás desde la fecha esperada más reciente.
+
+    Si hoy es esperada y aún no está hecha, la racha sigue viva contando
+    desde la fecha esperada anterior.
+    """
+    completions = set(_completion_dates(event_id, conn))
+    if not completions:
+        return 0
+
+    most_recent = _most_recent_expected_date(rule, today)
+    if most_recent is None:
+        return 0
+
+    if most_recent == today and today not in completions:
+        cursor = _previous_expected_date(rule, today)
+    else:
+        cursor = most_recent
+
+    streak = 0
+    while cursor is not None and cursor in completions:
+        streak += 1
+        cursor = _previous_expected_date(rule, cursor)
+    return streak
+
+
+def _best_streak(event_id: int, rule: str, conn) -> int:
+    """Racha máxima histórica para la rutina, sin huecos en el patrón esperado."""
+    completions = _completion_dates(event_id, conn)
+    if not completions:
+        return 0
+
+    best = 1
+    current = 1
+    for i in range(1, len(completions)):
+        expected_prev = _previous_expected_date(rule, completions[i])
+        if expected_prev is not None and expected_prev == completions[i - 1]:
+            current += 1
+            best = max(best, current)
+        else:
+            current = 1
+    return best
+
+
 def routine_summary(date_from: str, date_to: str) -> list[dict]:
     """Resumen agregado de rutinas (eventos recurrentes) para un rango de fechas.
 

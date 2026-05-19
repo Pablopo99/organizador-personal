@@ -382,3 +382,144 @@ def test_routine_summary_weekly_routine_not_in_range_excluded():
     summary = tools.routine_summary("2026-05-21", "2026-05-25")
     yoga = [r for r in summary if r["title"] == "Yoga"]
     assert yoga == []
+
+
+def _insert_completion(event_id: int, completion_date: str) -> None:
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, ?, ?)",
+            (event_id, completion_date, "2026-05-19T08:00:00"),
+        )
+
+
+def test_current_streak_daily_three_days_through_today():
+    """Hoy hecho + ayer + anteayer -> 3."""
+    from datetime import date
+    e = tools.add_event("F", "2026-05-17T08:00:00", "personal", recurring_rule="DAILY")
+    for d in ("2026-05-17", "2026-05-18", "2026-05-19"):
+        _insert_completion(e["id"], d)
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "DAILY", date(2026, 5, 19), conn)
+    assert streak == 3
+
+
+def test_current_streak_daily_alive_when_today_pending():
+    """Ayer y anteayer hechos, hoy pendiente -> 2 (vivo)."""
+    from datetime import date
+    e = tools.add_event("F", "2026-05-17T08:00:00", "personal", recurring_rule="DAILY")
+    for d in ("2026-05-17", "2026-05-18"):
+        _insert_completion(e["id"], d)
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "DAILY", date(2026, 5, 19), conn)
+    assert streak == 2
+
+
+def test_current_streak_daily_broken_when_yesterday_missing():
+    """Anteayer hecho pero ayer no -> 0 (roto)."""
+    from datetime import date
+    e = tools.add_event("F", "2026-05-17T08:00:00", "personal", recurring_rule="DAILY")
+    _insert_completion(e["id"], "2026-05-17")  # anteayer
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "DAILY", date(2026, 5, 19), conn)
+    assert streak == 0
+
+
+def test_current_streak_daily_only_today_done():
+    """Solo hoy hecho, sin historia -> 1."""
+    from datetime import date
+    e = tools.add_event("F", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+    _insert_completion(e["id"], "2026-05-19")
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "DAILY", date(2026, 5, 19), conn)
+    assert streak == 1
+
+
+def test_current_streak_weekly_two_consecutive_mondays_today_wednesday():
+    """WEEKLY:MON, 2 lunes seguidos hechos, hoy es miércoles -> 2."""
+    from datetime import date
+    e = tools.add_event("G", "2026-05-11T19:00:00", "personal", recurring_rule="WEEKLY:MON")
+    _insert_completion(e["id"], "2026-05-11")
+    _insert_completion(e["id"], "2026-05-18")
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "WEEKLY:MON", date(2026, 5, 20), conn)
+    assert streak == 2
+
+
+def test_current_streak_weekly_broken_last_monday_missed():
+    """WEEKLY:MON, último lunes no hecho -> 0."""
+    from datetime import date
+    e = tools.add_event("G", "2026-05-11T19:00:00", "personal", recurring_rule="WEEKLY:MON")
+    _insert_completion(e["id"], "2026-05-11")
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "WEEKLY:MON", date(2026, 5, 20), conn)
+    assert streak == 0
+
+
+def test_current_streak_weekly_today_is_target_weekday_pending():
+    """WEEKLY:MON, hoy es lunes y aún no hecho, los 2 lunes anteriores hechos -> 2 (vivo)."""
+    from datetime import date
+    e = tools.add_event("G", "2026-05-04T19:00:00", "personal", recurring_rule="WEEKLY:MON")
+    _insert_completion(e["id"], "2026-05-04")
+    _insert_completion(e["id"], "2026-05-11")
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "WEEKLY:MON", date(2026, 5, 18), conn)
+    assert streak == 2
+
+
+def test_current_streak_no_completions_returns_zero():
+    from datetime import date
+    e = tools.add_event("F", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+
+    with db.connect() as conn:
+        streak = tools._current_streak(e["id"], "DAILY", date(2026, 5, 19), conn)
+    assert streak == 0
+
+
+def test_best_streak_daily_max_run():
+    """Histórico DAILY: 5 seguidos, salto, 3 seguidos -> 5."""
+    e = tools.add_event("F", "2026-05-01T08:00:00", "personal", recurring_rule="DAILY")
+    for d in ("2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"):
+        _insert_completion(e["id"], d)
+    for d in ("2026-05-08", "2026-05-09", "2026-05-10"):
+        _insert_completion(e["id"], d)
+
+    with db.connect() as conn:
+        best = tools._best_streak(e["id"], "DAILY", conn)
+    assert best == 5
+
+
+def test_best_streak_weekly_consecutive_mondays():
+    """WEEKLY:MON: 3 lunes seguidos, salto, 2 lunes seguidos -> 3."""
+    e = tools.add_event("G", "2026-05-04T19:00:00", "personal", recurring_rule="WEEKLY:MON")
+    for d in ("2026-05-04", "2026-05-11", "2026-05-18"):
+        _insert_completion(e["id"], d)
+    for d in ("2026-06-01", "2026-06-08"):
+        _insert_completion(e["id"], d)
+
+    with db.connect() as conn:
+        best = tools._best_streak(e["id"], "WEEKLY:MON", conn)
+    assert best == 3
+
+
+def test_best_streak_no_completions_returns_zero():
+    e = tools.add_event("F", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+
+    with db.connect() as conn:
+        best = tools._best_streak(e["id"], "DAILY", conn)
+    assert best == 0
+
+
+def test_best_streak_single_completion_returns_one():
+    e = tools.add_event("F", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+    _insert_completion(e["id"], "2026-05-19")
+
+    with db.connect() as conn:
+        best = tools._best_streak(e["id"], "DAILY", conn)
+    assert best == 1
