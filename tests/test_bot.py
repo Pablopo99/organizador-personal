@@ -1,4 +1,6 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 import bot
 
@@ -197,3 +199,193 @@ def test_semana_prompt_mentions_streak_threshold():
     assert "current_streak" in prompt
     assert "🔥" in prompt
     assert "seguidos" in prompt
+
+
+@pytest.fixture
+def temp_db_for_bot(monkeypatch):
+    import os
+    import tempfile
+
+    import db as db_mod
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    monkeypatch.setattr(db_mod, "DB_PATH", path)
+    db_mod.init_schema()
+    yield path
+    os.unlink(path)
+
+
+def _make_callback_query(data: str, user_id: int = 42):
+    query = MagicMock()
+    query.data = data
+    query.from_user = MagicMock()
+    query.from_user.id = user_id
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    return query
+
+
+def _make_update_with_callback(query):
+    update = MagicMock()
+    update.callback_query = query
+    update.effective_user = query.from_user
+    return update
+
+
+def _make_context_with_bot():
+    context = MagicMock()
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock()
+    return context
+
+
+@pytest.mark.asyncio
+async def test_callback_mark_event_done(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+
+    query = _make_callback_query(f"mE:{e['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
+    assert row[0] == 1
+    query.edit_message_text.assert_called_once()
+    query.answer.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_callback_unmark_event_done(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(e["id"])
+
+    query = _make_callback_query(f"uE:{e['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
+    assert row[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_callback_mark_routine_inserts_completion(temp_db_for_bot, monkeypatch):
+    import tools
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    e = tools.add_event("Flexiones", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+
+    query = _make_callback_query(f"mR:{e['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM routine_completions WHERE event_id = ? AND completion_date = ?",
+            (e["id"], "2026-05-19"),
+        ).fetchone()[0]
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_unmark_routine_deletes_completion(temp_db_for_bot, monkeypatch):
+    import tools
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    e = tools.add_event("Flexiones", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+    tools.mark_event_done(e["id"])
+
+    query = _make_callback_query(f"uR:{e['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM routine_completions WHERE event_id = ?",
+            (e["id"],),
+        ).fetchone()[0]
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_callback_mark_task(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    t = tools.add_task("comprar pan")
+
+    query = _make_callback_query(f"mT:{t['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done FROM tasks WHERE id = ?", (t["id"],)).fetchone()
+    assert row[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_unmark_task(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    t = tools.add_task("comprar pan")
+    tools.complete_task(t["id"])
+
+    query = _make_callback_query(f"uT:{t['id']}")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done, done_at FROM tasks WHERE id = ?", (t["id"],)).fetchone()
+    assert row[0] == 0
+    assert row[1] is None
+
+
+@pytest.mark.asyncio
+async def test_callback_unauthorized_user_no_mutation(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+
+    query = _make_callback_query(f"mE:{e['id']}", user_id=999)
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    import db as db_mod
+    with db_mod.connect() as conn:
+        row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
+    assert row[0] == 0
+    query.edit_message_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_callback_malformed_data_does_not_crash(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    query = _make_callback_query("garbage")
+    await bot._on_callback_query(_make_update_with_callback(query), _make_context_with_bot())
+
+    query.answer.assert_called()
+    query.edit_message_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_callback_edit_failure_sends_new_message(temp_db_for_bot, monkeypatch):
+    from telegram.error import BadRequest
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+
+    query = _make_callback_query(f"mE:{e['id']}")
+    query.edit_message_text.side_effect = BadRequest("Message to edit not found")
+
+    context = _make_context_with_bot()
+    await bot._on_callback_query(_make_update_with_callback(query), context)
+
+    context.bot.send_message.assert_called_once()

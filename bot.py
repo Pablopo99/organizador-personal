@@ -5,8 +5,10 @@ from typing import Optional
 
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -207,6 +209,71 @@ async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+_CALLBACK_ACTIONS = {
+    "mE": lambda i: tools.mark_event_done(i),
+    "uE": lambda i: tools.unmark_event_done(i),
+    "mR": lambda i: tools.mark_event_done(i),
+    "uR": lambda i: tools.uncomplete_routine_today(i),
+    "mT": lambda i: tools.complete_task(i),
+    "uT": lambda i: tools.uncomplete_task(i),
+}
+
+
+async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Procesa taps en botones inline de /hoy y saludo matutino."""
+    query = update.callback_query
+    if query is None:
+        return
+    if query.from_user.id != ALLOWED_USER_ID:
+        log.warning("Callback ignorado de user_id no autorizado: %s", query.from_user.id)
+        await query.answer("No autorizado")
+        return
+
+    data = query.data or ""
+    if len(data) < 4 or ":" not in data:
+        log.warning("callback_data malformado: %r", data)
+        await query.answer("Acción no reconocida")
+        return
+
+    action_type = data[:2]
+    try:
+        item_id = int(data.split(":", 1)[1])
+    except ValueError:
+        log.warning("callback_data sin id válido: %r", data)
+        await query.answer("Acción no reconocida")
+        return
+
+    handler = _CALLBACK_ACTIONS.get(action_type)
+    if handler is None:
+        log.warning("Acción de callback desconocida: %r", action_type)
+        await query.answer("Acción no reconocida")
+        return
+
+    try:
+        handler(item_id)
+    except Exception:
+        log.exception("Error aplicando mutación de callback %s", data)
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_today_view(today, conn)
+
+    try:
+        await query.edit_message_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=keyboard,
+        )
+    except BadRequest:
+        log.warning("Mensaje no editable (probablemente >48h), enviando nuevo")
+        await context.bot.send_message(
+            chat_id=ALLOWED_USER_ID,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+
+    await query.answer()
+
+
 def _make_slash_handler(command: str):
     """Factory: crea un handler async para un comando slash conocido."""
     async def handler(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -250,6 +317,7 @@ def main() -> None:
     # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
+    app.add_handler(CallbackQueryHandler(_on_callback_query))
 
     # Jobs programados
     madrid = pytz.timezone("Europe/Madrid")
