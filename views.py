@@ -118,3 +118,94 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
         )])
 
     return text, InlineKeyboardMarkup(buttons)
+
+
+def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /semana: 4 secciones, botones solo en objetivos."""
+    from datetime import timedelta
+
+    from date_utils import monday_of_week
+
+    monday = monday_of_week(today)
+    sunday = monday + timedelta(days=6)
+    week_start_iso = f"{monday.isoformat()}T00:00:00"
+    week_end_iso = f"{sunday.isoformat()}T23:59:59"
+
+    events = tools.query_events(week_start_iso, week_end_iso, include_done=True)
+    objectives = tools.query_objectives(monday.isoformat())
+    tasks_all = tools.list_tasks(include_done=True)
+    routines = tools.routine_summary(monday.isoformat(), sunday.isoformat())
+
+    week_pending = [e for e in events if not e.get("recurring_rule") and e["done"] == 0]
+    week_done = [e for e in events if not e.get("recurring_rule") and e["done"] == 1]
+
+    task_done_week = []
+    for t in tasks_all:
+        if t["done"] != 1:
+            continue
+        done_at = t.get("done_at") or ""
+        if not done_at:
+            continue
+        try:
+            done_date = date.fromisoformat(done_at.split("T")[0])
+        except ValueError:
+            continue
+        if monday <= done_date <= sunday:
+            task_done_week.append(t)
+
+    weekdays_es = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+
+    sections: list[str] = []
+
+    if week_pending:
+        lines = []
+        for e in week_pending:
+            dt = datetime.fromisoformat(e["datetime"])
+            wd = weekdays_es[dt.weekday()]
+            lines.append(f"• {wd} {dt.strftime('%H:%M')} — {e['title']}")
+        sections.append("📅 <b>ESTA SEMANA</b>\n\n" + "\n".join(lines))
+
+    if objectives:
+        lines = []
+        for o in objectives:
+            mark = "✅" if o["done"] else "🔲"
+            lines.append(f"{mark} {o['text']}")
+        sections.append("🎯 <b>OBJETIVOS</b>\n\n" + "\n".join(lines))
+
+    if routines:
+        lines = []
+        for r in routines:
+            base = f"• {r['title']} ({r['completed_days']}/{r['scheduled_days']} días)"
+            if r["current_streak"] >= 2:
+                base += f" 🔥 {r['current_streak']} seguidos"
+            lines.append(base)
+        sections.append("🔁 <b>RUTINAS</b>\n\n" + "\n".join(lines))
+
+    if week_done or task_done_week:
+        lines = []
+        for e in week_done:
+            dt = datetime.fromisoformat(e["datetime"])
+            wd = weekdays_es[dt.weekday()]
+            lines.append(f"• <s>{wd} {dt.strftime('%H:%M')} — {e['title']}</s>")
+        for t in task_done_week:
+            lines.append(f"• <s>{t['text']}</s>")
+        sections.append("✅ <b>COMPLETADO</b>\n\n" + "\n".join(lines))
+
+    if not sections:
+        return "Semana tranquila 💆", None
+
+    text = "\n\n".join(sections)
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for o in objectives:
+        if o["done"]:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {o['text']}", callback_data=f"uO:{o['id']}:W"
+            )])
+        else:
+            buttons.append([InlineKeyboardButton(
+                f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:W"
+            )])
+
+    keyboard = InlineKeyboardMarkup(buttons) if buttons else None
+    return text, keyboard
