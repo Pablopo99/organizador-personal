@@ -312,3 +312,73 @@ def test_query_events_non_recurring_done_unchanged():
 
     med = [r for r in rows if r["title"] == "Médico"][0]
     assert med["done"] == 1
+
+
+def test_routine_summary_counts_completions_in_range():
+    """Marca 3 días de la semana → completed_days=3, scheduled_days=7."""
+    created = tools.add_event(
+        "Flexiones", "2026-05-18T08:00:00", "personal",
+        recurring_rule="DAILY",
+    )
+    with db.connect() as conn:
+        for d in ("2026-05-18", "2026-05-19", "2026-05-20"):
+            conn.execute(
+                "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, ?, ?)",
+                (created["id"], d, "2026-05-19T08:00:00"),
+            )
+
+    summary = tools.routine_summary("2026-05-18", "2026-05-24")
+
+    flex = [r for r in summary if r["title"] == "Flexiones"][0]
+    assert flex["scheduled_days"] == 7
+    assert flex["completed_days"] == 3
+    assert flex["event_id"] == created["id"]
+    assert flex["recurring_rule"] == "DAILY"
+
+
+def test_routine_summary_weekly_routine_scheduled_once():
+    """WEEKLY:MON entre lunes 18 y domingo 24 → scheduled_days=1."""
+    tools.add_event(
+        "Gimnasio", "2026-05-18T19:00:00", "personal",
+        recurring_rule="WEEKLY:MON",
+    )
+
+    summary = tools.routine_summary("2026-05-18", "2026-05-24")
+
+    gym = [r for r in summary if r["title"] == "Gimnasio"][0]
+    assert gym["scheduled_days"] == 1
+    assert gym["completed_days"] == 0
+
+
+def test_routine_summary_ignores_non_recurring():
+    """Eventos puntuales no aparecen en el summary."""
+    tools.add_event("Médico", "2026-05-20T10:00:00", "medical")
+
+    summary = tools.routine_summary("2026-05-18", "2026-05-24")
+
+    titles = [r["title"] for r in summary]
+    assert "Médico" not in titles
+
+
+def test_routine_summary_empty_when_no_routines():
+    summary = tools.routine_summary("2026-05-18", "2026-05-24")
+    assert summary == []
+
+
+def test_routine_summary_weekly_routine_not_in_range_excluded():
+    """WEEKLY:TUE en una semana que no contiene martes → no aparece."""
+    tools.add_event(
+        "Yoga", "2026-05-19T07:00:00", "personal",
+        recurring_rule="WEEKLY:TUE",
+    )
+
+    # Rango Wed-Tue: contiene un martes
+    summary = tools.routine_summary("2026-05-20", "2026-05-26")
+    yoga = [r for r in summary if r["title"] == "Yoga"]
+    assert len(yoga) == 1
+    assert yoga[0]["scheduled_days"] == 1
+
+    # Rango sin martes
+    summary = tools.routine_summary("2026-05-21", "2026-05-25")
+    yoga = [r for r in summary if r["title"] == "Yoga"]
+    assert yoga == []

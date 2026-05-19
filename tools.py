@@ -191,6 +191,69 @@ def mark_event_done(event_id: int) -> dict:
         return {"id": event_id, "updated": cur.rowcount}
 
 
+def routine_summary(date_from: str, date_to: str) -> list[dict]:
+    """Resumen agregado de rutinas (eventos recurrentes) para un rango de fechas.
+
+    Devuelve una fila por rutina con cuántos días tocaba (scheduled_days)
+    y cuántos se completaron (completed_days) dentro del rango inclusivo.
+
+    Formato fechas: 'YYYY-MM-DD'.
+    """
+    start = date.fromisoformat(date_from)
+    end = date.fromisoformat(date_to)
+    if end < start:
+        return []
+
+    results: list[dict] = []
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE recurring_rule IS NOT NULL"
+        ).fetchall()
+
+        for row in rows:
+            rule = row["recurring_rule"]
+            scheduled = _count_scheduled_days(rule, row["datetime"], start, end)
+            if scheduled == 0:
+                continue
+            completed = conn.execute(
+                """
+                SELECT COUNT(*) FROM routine_completions
+                WHERE event_id = ?
+                  AND completion_date >= ?
+                  AND completion_date <= ?
+                """,
+                (row["id"], date_from, date_to),
+            ).fetchone()[0]
+            results.append({
+                "event_id": row["id"],
+                "title": row["title"],
+                "category": row["category"],
+                "recurring_rule": rule,
+                "scheduled_days": scheduled,
+                "completed_days": completed,
+            })
+    return results
+
+
+def _count_scheduled_days(rule: str, base_datetime_iso: str, start: date, end: date) -> int:
+    """Cuántas instancias programadas tiene una rutina en [start, end]."""
+    if rule == "DAILY":
+        return (end - start).days + 1
+    if rule.startswith("WEEKLY:"):
+        weekday_code = rule.split(":", 1)[1]
+        if weekday_code not in _WEEKDAY_MAP:
+            return 0
+        target = _WEEKDAY_MAP[weekday_code]
+        count = 0
+        cur = start
+        while cur <= end:
+            if cur.weekday() == target:
+                count += 1
+            cur += timedelta(days=1)
+        return count
+    return 0
+
+
 # ------------------------------------------------------------ objectives ----
 
 def add_objective(text: str, week_start: str) -> dict:
@@ -351,6 +414,22 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "routine_summary",
+        "description": (
+            "Resumen agregado de rutinas (eventos recurrentes) para un rango de "
+            "fechas. Devuelve por cada rutina cuántos días tocaba (scheduled_days) "
+            "y cuántos se completaron (completed_days). Útil para /semana."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date_from": {"type": "string", "description": "ISO date YYYY-MM-DD"},
+                "date_to": {"type": "string", "description": "ISO date YYYY-MM-DD"},
+            },
+            "required": ["date_from", "date_to"],
+        },
+    },
+    {
         "name": "add_objective",
         "description": (
             "Añade un objetivo semanal. week_start puede ser cualquier fecha de la semana; "
@@ -422,6 +501,7 @@ _DISPATCH = {
     "update_event": update_event,
     "delete_event": delete_event,
     "mark_event_done": mark_event_done,
+    "routine_summary": routine_summary,
     "add_objective": add_objective,
     "query_objectives": query_objectives,
     "mark_objective_done": mark_objective_done,

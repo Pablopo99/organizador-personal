@@ -41,3 +41,9 @@ def test_dispatch_add_task():
 def test_dispatch_unknown_tool():
     with pytest.raises(ValueError, match="desconocida"):
         tools.dispatch("nope", {})
+
+
+def test_routine_summary_is_registered():
+    names = [t["name"] for t in tools.TOOL_DEFINITIONS]
+    assert "routine_summary" in names
+    assert "routine_summary" in tools._DISPATCH
