@@ -165,11 +165,11 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             lines.append(f"• {wd} {dt.strftime('%H:%M')} — {e['title']}")
         sections.append("📅 <b>ESTA SEMANA</b>\n\n" + "\n".join(lines))
 
-    if objectives:
-        lines = []
-        for o in objectives:
-            mark = "✅" if o["done"] else "🔲"
-            lines.append(f"{mark} {o['text']}")
+    pending_objectives = [o for o in objectives if not o["done"]]
+    done_objectives = [o for o in objectives if o["done"]]
+
+    if pending_objectives:
+        lines = [f"🔲 {o['text']}" for o in pending_objectives]
         sections.append("🎯 <b>OBJETIVOS</b>\n\n" + "\n".join(lines))
 
     if routines:
@@ -181,12 +181,14 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             lines.append(base)
         sections.append("🔁 <b>RUTINAS</b>\n\n" + "\n".join(lines))
 
-    if week_done or task_done_week:
+    if week_done or task_done_week or done_objectives:
         lines = []
         for e in week_done:
             dt = datetime.fromisoformat(e["datetime"])
             wd = weekdays_es[dt.weekday()]
             lines.append(f"• <s>{wd} {dt.strftime('%H:%M')} — {e['title']}</s>")
+        for o in done_objectives:
+            lines.append(f"🎯 <s>{o['text']}</s>")
         for t in task_done_week:
             lines.append(f"• <s>{t['text']}</s>")
         sections.append("✅ <b>COMPLETADO</b>\n\n" + "\n".join(lines))
@@ -197,15 +199,14 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
     text = "\n\n".join(sections)
 
     buttons: list[list[InlineKeyboardButton]] = []
-    for o in objectives:
-        if o["done"]:
-            buttons.append([InlineKeyboardButton(
-                f"✅ {o['text']}", callback_data=f"uO:{o['id']}:W"
-            )])
-        else:
-            buttons.append([InlineKeyboardButton(
-                f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:W"
-            )])
+    for o in pending_objectives:
+        buttons.append([InlineKeyboardButton(
+            f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:W"
+        )])
+    for o in done_objectives:
+        buttons.append([InlineKeyboardButton(
+            f"✅ {o['text']}", callback_data=f"uO:{o['id']}:W"
+        )])
 
     keyboard = InlineKeyboardMarkup(buttons) if buttons else None
     return text, keyboard

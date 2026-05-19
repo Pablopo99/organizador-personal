@@ -228,26 +228,38 @@ def test_render_week_view_only_objective_has_button():
     assert btn.callback_data == f"mO:{o['id']}:W"
 
 
-def test_render_week_view_done_objective_has_undo_button():
+def test_render_week_view_done_objective_appears_in_completado_tachado():
+    """Un objetivo hecho aparece en COMPLETADO tachado, NO en OBJETIVOS."""
     o = tools.add_objective("Subir vídeos", "2026-05-18")
     tools.mark_objective_done(o["id"])
 
     text, keyboard = _render_week()
 
-    assert "OBJETIVOS" in text
-    assert "✅" in text
+    assert "COMPLETADO" in text
+    assert "<s>Subir vídeos</s>" in text
+    # No aparece en sección OBJETIVOS (que se omite porque no hay pendientes)
+    assert "OBJETIVOS" not in text
+
+    # Botón ✅ presente para deshacer
     assert keyboard is not None
     btn = keyboard.inline_keyboard[0][0]
     assert btn.text == "✅ Subir vídeos"
     assert btn.callback_data == f"uO:{o['id']}:W"
 
 
-def test_render_week_view_pending_and_done_objectives_both_get_buttons():
+def test_render_week_view_pending_in_objectives_done_in_completado():
+    """Pendiente en OBJETIVOS, hecho en COMPLETADO. Ambos con botón."""
     o1 = tools.add_objective("Pendiente", "2026-05-18")
     o2 = tools.add_objective("Hecho", "2026-05-18")
     tools.mark_objective_done(o2["id"])
 
     text, keyboard = _render_week()
+
+    assert "OBJETIVOS" in text
+    assert "🔲 Pendiente" in text
+    assert "Hecho" not in text.split("OBJETIVOS")[1].split("COMPLETADO")[0]  # Hecho NO está en OBJETIVOS
+    assert "COMPLETADO" in text
+    assert "<s>Hecho</s>" in text
 
     assert keyboard is not None
     datas = [row[0].callback_data for row in keyboard.inline_keyboard]
