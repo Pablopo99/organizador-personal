@@ -192,3 +192,20 @@ async def test_check_reminders_event_outside_window(monkeypatch):
     send_mock.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_weekly_objectives_reminder_sends_message(monkeypatch):
+    """Domingo a las 13:00 Madrid: recordatorio para pensar los 3 objetivos."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+
+    send_mock = AsyncMock()
+    await scheduler.weekly_objectives_reminder(_fake_context(send_mock))
+
+    send_mock.assert_called_once()
+    call = send_mock.call_args
+    assert call.kwargs["chat_id"] == 42
+    text = call.kwargs["text"]
+    assert "objetivos" in text.lower()
+    assert "🎯" in text
+    assert call.kwargs["parse_mode"] == "HTML"
+
+

@@ -363,6 +363,12 @@ def main() -> None:
         first=30,
         name="check_reminders",
     )
+    app.job_queue.run_daily(
+        scheduler.weekly_objectives_reminder,
+        time=dtime(hour=13, minute=0, tzinfo=madrid),
+        days=(6,),  # 6 = domingo en python-telegram-bot
+        name="weekly_objectives_reminder",
+    )
 
     log.info("Bot arrancando (polling)…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

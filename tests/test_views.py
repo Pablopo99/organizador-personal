@@ -120,9 +120,12 @@ def test_render_task_pending_with_button():
 def test_render_task_done_today_in_completado(monkeypatch):
     import date_utils
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
-    monkeypatch.setattr(date_utils, "now_iso", lambda: "2026-05-19T10:00:00")
     t = tools.add_task("comprar pan")
-    tools.complete_task(t["id"])
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET done=1, done_at=? WHERE id=?",
+            ("2026-05-19T10:00:00", t["id"]),
+        )
 
     text, keyboard = _render()
 

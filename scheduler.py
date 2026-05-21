@@ -49,6 +49,23 @@ async def morning_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
         log.exception("Error enviando el saludo matutino")
 
 
+async def weekly_objectives_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Domingo a las 13:00 Madrid: pídele a Pablo pensar los 3 objetivos de la semana que entra."""
+    text = (
+        "🎯 <b>Domingo de objetivos</b>\n\n"
+        "Para la semana que empieza mañana, párate y piensa tus <b>3 objetivos</b>. "
+        "Cuéntamelos cuando los tengas claros y los apunto."
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=ALLOWED_USER_ID,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        log.exception("Error enviando recordatorio semanal de objetivos")
+
+
 _DAY_REMINDER_MIN_HOURS = 23.0
 _DAY_REMINDER_MAX_HOURS = 25.0
 _HOUR_REMINDER_MIN_MIN = 50.0
