@@ -366,7 +366,7 @@ def main() -> None:
     app.job_queue.run_daily(
         scheduler.weekly_objectives_reminder,
         time=dtime(hour=13, minute=0, tzinfo=madrid),
-        days=(6,),  # 6 = domingo en python-telegram-bot
+        days=(0,),  # 0 = domingo en python-telegram-bot v21 (_CRON_MAPPING es sun-sat)
         name="weekly_objectives_reminder",
     )
 

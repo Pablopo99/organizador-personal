@@ -192,6 +192,17 @@ async def test_check_reminders_event_outside_window(monkeypatch):
     send_mock.assert_not_called()
 
 
+def test_ptb_days_convention_zero_is_sunday():
+    """Sanity check: en python-telegram-bot v21 days=(0,) es domingo.
+
+    Si esto cambia (PTB v22+ podría revertir la convención), nuestro
+    weekly_objectives_reminder se dispararía el día equivocado.
+    """
+    from telegram.ext._jobqueue import JobQueue
+    assert JobQueue._CRON_MAPPING[0] == "sun"
+    assert JobQueue._CRON_MAPPING[6] == "sat"
+
+
 @pytest.mark.asyncio
 async def test_weekly_objectives_reminder_sends_message(monkeypatch):
     """Domingo a las 13:00 Madrid: recordatorio para pensar los 3 objetivos."""
