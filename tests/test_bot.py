@@ -63,7 +63,7 @@ def test_process_voice_transcription_whitespace_only_returns_friendly_message(mo
     assert "no he entendido" in reply.lower()
 
 
-def test_process_voice_transcription_composes_prefix(monkeypatch):
+def test_process_voice_transcription_returns_brain_reply_without_prefix(monkeypatch):
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
 
     def fake_brain(text, user_id=0):
@@ -73,8 +73,8 @@ def test_process_voice_transcription_composes_prefix(monkeypatch):
 
     reply = bot.process_voice_transcription("añade comprar pan", from_user_id=42)
 
-    assert reply.startswith("📝 He entendido: «añade comprar pan»\n\n")
-    assert "respuesta a: añade comprar pan" in reply
+    assert reply == "respuesta a: añade comprar pan"
+    assert "He entendido" not in reply
 
 
 def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatch):

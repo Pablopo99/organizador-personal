@@ -101,7 +101,7 @@ def process_incoming(text: str, from_user_id: int) -> Optional[str]:
 
 
 def process_voice_transcription(transcription: str, from_user_id: int) -> Optional[str]:
-    """Lógica pura: dada una transcripción y user id, devuelve la respuesta completa con prefijo."""
+    """Lógica pura: dada una transcripción y user id, devuelve la respuesta del cerebro."""
     if from_user_id != ALLOWED_USER_ID:
         log.warning("Voz ignorada de user_id no autorizado: %s", from_user_id)
         return None
@@ -111,15 +111,13 @@ def process_voice_transcription(transcription: str, from_user_id: int) -> Option
         return "No he entendido nada del audio. ¿Puedes repetirlo o escribirme?"
 
     try:
-        brain_reply = markdown_to_html(brain.handle_message(cleaned, user_id=from_user_id))
+        return markdown_to_html(brain.handle_message(cleaned, user_id=from_user_id))
     except Exception:
         log.exception("Error procesando transcripción de voz")
         return (
             "Ahora mismo no puedo procesar esto. "
             "Prueba a reformularlo o vuelve a intentarlo en un momento."
         )
-
-    return f"📝 He entendido: «{cleaned}»\n\n{brain_reply}"
 
 
 async def _on_message(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
