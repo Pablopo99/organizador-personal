@@ -26,6 +26,8 @@ ALLOWED_USER_ID = int(_require("ALLOWED_USER_ID"))
 # Opcional: si está vacía, el bot ignorará mensajes de voz con respuesta de "no configurado".
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
+SIRI_TOKEN = _require("SIRI_TOKEN")
+
 TIMEZONE = "Europe/Madrid"
 DB_PATH = os.environ.get("DB_PATH") or str(_PROJECT_ROOT / "organizador.db")
 CATEGORIES = ("medical", "work", "personal", "other")

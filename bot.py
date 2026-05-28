@@ -348,19 +348,21 @@ async def _set_bot_commands(application: Application) -> None:
     ])
 
 
-def main() -> None:
+async def _async_main() -> None:
     from datetime import time as dtime
 
     import pytz
+    from aiohttp import web
 
     import scheduler
+    import siri_server
+    from config import SIRI_TOKEN
 
     db.init_schema()
     log.info("Base de datos lista en %s", db.DB_PATH)
 
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(_set_bot_commands).build()
 
-    # Slash commands
     app.add_handler(CommandHandler("hoy", _on_hoy))
     app.add_handler(CommandHandler("manana", _on_manana))
     app.add_handler(CommandHandler("pendientes", _on_pendientes))
@@ -368,12 +370,10 @@ def main() -> None:
     for cmd in ("objetivos", "rachas"):
         app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
 
-    # Mensajes de texto (incluye /nueva, /reset, /clear que no están registrados como CommandHandler)
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
     app.add_handler(CallbackQueryHandler(_on_callback_query))
 
-    # Jobs programados
     madrid = pytz.timezone("Europe/Madrid")
     app.job_queue.run_daily(
         scheduler.morning_summary,
@@ -389,12 +389,38 @@ def main() -> None:
     app.job_queue.run_daily(
         scheduler.weekly_objectives_reminder,
         time=dtime(hour=13, minute=0, tzinfo=madrid),
-        days=(0,),  # 0 = domingo en python-telegram-bot v21 (_CRON_MAPPING es sun-sat)
+        days=(0,),
         name="weekly_objectives_reminder",
     )
 
-    log.info("Bot arrancando (polling)…")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+    siri_app = siri_server.build_app(
+        telegram_bot=app.bot,
+        brain_fn=brain.handle_message,
+        siri_token=SIRI_TOKEN,
+        allowed_user_id=ALLOWED_USER_ID,
+    )
+    runner = web.AppRunner(siri_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+
+    log.info("Bot arrancando (polling + HTTP en :8080)…")
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        await runner.cleanup()
+
+
+def main() -> None:
+    asyncio.run(_async_main())
 
 
 if __name__ == "__main__":
