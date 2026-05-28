@@ -112,7 +112,7 @@ def render_today_view(
             )])
         else:
             buttons.append([InlineKeyboardButton(
-                f"▼ Ver completados ({completed_count})", callback_data="tg:0:Hc"
+                f"🏆 Ver completados ({completed_count})", callback_data="tg:0:Hc"
             )])
 
     keyboard = InlineKeyboardMarkup(buttons) if buttons else None
