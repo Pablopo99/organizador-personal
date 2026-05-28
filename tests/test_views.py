@@ -259,7 +259,7 @@ def test_render_week_view_pending_in_objectives_done_in_completado():
     text, keyboard = _render_week()
 
     assert "OBJETIVOS" in text
-    assert "🔲 Pendiente" in text
+    assert "• Pendiente" in text
     assert "Hecho" not in text.split("OBJETIVOS")[1].split("COMPLETADO")[0]  # Hecho NO está en OBJETIVOS
     assert "COMPLETADO" in text
     assert "<s>Hecho</s>" in text

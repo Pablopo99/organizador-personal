@@ -39,7 +39,7 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
         for e in hoy_pending:
             dt = datetime.fromisoformat(e["datetime"])
             lines.append(f"• {dt.strftime('%H:%M')} — {e['title']}")
-        sections.append("📅 <b>HOY</b>\n\n" + "\n".join(lines))
+        sections.append("📅 <b>HOY</b>\n" + "\n".join(lines))
 
     if rutina_pending:
         lines = []
@@ -47,11 +47,11 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
             streak = streak_by_id.get(e["id"], 0)
             suffix = f" 🔥 {streak}" if streak >= 2 else ""
             lines.append(f"• {e['title']}{suffix}")
-        sections.append("🔁 <b>RUTINAS</b>\n\n" + "\n".join(lines))
+        sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
 
     if task_pending:
         lines = [f"• {t['text']}" for t in task_pending]
-        sections.append("📝 <b>PENDIENTES</b>\n\n" + "\n".join(lines))
+        sections.append("📝 <b>PENDIENTES</b>\n" + "\n".join(lines))
 
     if hoy_done or rutina_done or task_done_today:
         lines = []
@@ -64,7 +64,7 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
             lines.append(f"• <s>{e['title']}{suffix}</s>")
         for t in task_done_today:
             lines.append(f"• <s>{t['text']}</s>")
-        sections.append("✅ <b>COMPLETADO HOY</b>\n\n" + "\n".join(lines))
+        sections.append("✅ <b>COMPLETADO HOY</b>\n" + "\n".join(lines))
 
     if not sections:
         return "Día libre, disfrútalo 💪", None
@@ -109,7 +109,7 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
         return "No tienes tareas pendientes. 🎉", None
 
     lines = [f"• {t['text']}" for t in tasks_all]
-    text = "📝 <b>PENDIENTES</b>\n\n" + "\n".join(lines)
+    text = "📝 <b>PENDIENTES</b>\n" + "\n".join(lines)
 
     buttons: list[list[InlineKeyboardButton]] = []
     for t in tasks_all:
@@ -163,14 +163,14 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             dt = datetime.fromisoformat(e["datetime"])
             wd = weekdays_es[dt.weekday()]
             lines.append(f"• {wd} {dt.strftime('%H:%M')} — {e['title']}")
-        sections.append("📅 <b>ESTA SEMANA</b>\n\n" + "\n".join(lines))
+        sections.append("📅 <b>ESTA SEMANA</b>\n" + "\n".join(lines))
 
     pending_objectives = [o for o in objectives if not o["done"]]
     done_objectives = [o for o in objectives if o["done"]]
 
     if pending_objectives:
-        lines = [f"🔲 {o['text']}" for o in pending_objectives]
-        sections.append("🎯 <b>OBJETIVOS</b>\n\n" + "\n".join(lines))
+        lines = [f"• {o['text']}" for o in pending_objectives]
+        sections.append("🎯 <b>OBJETIVOS</b>\n" + "\n".join(lines))
 
     if routines:
         lines = []
@@ -179,7 +179,7 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             if r["current_streak"] >= 2:
                 base += f" 🔥 {r['current_streak']} seguidos"
             lines.append(base)
-        sections.append("🔁 <b>RUTINAS</b>\n\n" + "\n".join(lines))
+        sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
 
     if week_done or task_done_week or done_objectives:
         lines = []
@@ -188,10 +188,10 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             wd = weekdays_es[dt.weekday()]
             lines.append(f"• <s>{wd} {dt.strftime('%H:%M')} — {e['title']}</s>")
         for o in done_objectives:
-            lines.append(f"🎯 <s>{o['text']}</s>")
+            lines.append(f"• <s>{o['text']}</s>")
         for t in task_done_week:
             lines.append(f"• <s>{t['text']}</s>")
-        sections.append("✅ <b>COMPLETADO</b>\n\n" + "\n".join(lines))
+        sections.append("✅ <b>COMPLETADO</b>\n" + "\n".join(lines))
 
     if not sections:
         return "Semana tranquila 💆", None
