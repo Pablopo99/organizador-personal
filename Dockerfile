@@ -23,4 +23,6 @@ COPY . .
 # config.py lee DB_PATH del entorno si está definido.
 ENV DB_PATH=/data/organizador.db
 
+EXPOSE 8080
+
 CMD ["python", "bot.py"]
