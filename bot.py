@@ -189,6 +189,26 @@ async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _on_manana(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/manana: vista de lo que toca mañana (solo lectura)."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/manana ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    from datetime import timedelta
+    tomorrow = date_utils.today_madrid() + timedelta(days=1)
+    with db.connect() as conn:
+        text, keyboard = views.render_tomorrow_view(tomorrow, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 async def _on_pendientes(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """/pendientes: lista de tareas pendientes con botón por tarea."""
     if not update.message or not update.effective_user:
@@ -316,6 +336,7 @@ async def _set_bot_commands(application: Application) -> None:
     """Registra el menú de comandos visible al escribir '/' en Telegram."""
     await application.bot.set_my_commands([
         BotCommand("hoy", "Resumen de hoy"),
+        BotCommand("manana", "Resumen de mañana"),
         BotCommand("semana", "Resumen de la semana"),
         BotCommand("pendientes", "Tareas pendientes"),
         BotCommand("objetivos", "Objetivos de la semana"),
@@ -338,6 +359,7 @@ def main() -> None:
 
     # Slash commands
     app.add_handler(CommandHandler("hoy", _on_hoy))
+    app.add_handler(CommandHandler("manana", _on_manana))
     app.add_handler(CommandHandler("pendientes", _on_pendientes))
     app.add_handler(CommandHandler("semana", _on_semana))
     for cmd in ("objetivos", "rachas"):

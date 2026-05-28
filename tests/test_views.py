@@ -25,6 +25,12 @@ def _render(today=None):
         return views.render_today_view(today, conn)
 
 
+def _render_tomorrow(tomorrow=None):
+    tomorrow = tomorrow or date(2026, 5, 20)
+    with db.connect() as conn:
+        return views.render_tomorrow_view(tomorrow, conn)
+
+
 def test_render_empty_db_returns_day_libre():
     text, keyboard = _render()
     assert "Día libre" in text
@@ -316,3 +322,65 @@ def test_render_full_mix_keyboard_order():
     assert "Reunión" in btn_texts[0]
     assert btn_texts[-1].startswith("✅")
     assert "Cita" in btn_texts[-1]
+
+
+def test_render_tomorrow_view_empty_returns_libre():
+    text, keyboard = _render_tomorrow()
+    assert "Mañana lo tienes libre" in text
+    assert keyboard is None
+
+
+def test_render_tomorrow_view_event_tomorrow_appears_in_manana():
+    tools.add_event("Dentista", "2026-05-20T17:00:00", "medical")
+
+    text, keyboard = _render_tomorrow()
+
+    assert "📅" in text
+    assert "MAÑANA" in text
+    assert "17:00 — Dentista" in text
+    assert keyboard is None
+
+
+def test_render_tomorrow_view_event_today_not_shown():
+    tools.add_event("Hoy a las 10", "2026-05-19T10:00:00", "work")
+
+    text, keyboard = _render_tomorrow()
+
+    assert "Mañana lo tienes libre" in text
+    assert "Hoy a las 10" not in text
+
+
+def test_render_tomorrow_view_daily_routine_appears():
+    tools.add_event("Flexiones", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
+
+    text, keyboard = _render_tomorrow()
+
+    assert "🔁" in text
+    assert "RUTINAS" in text
+    assert "Flexiones" in text
+
+
+def test_render_tomorrow_view_does_not_show_pendientes():
+    """Tareas sin fecha no aparecen en /mañana."""
+    tools.add_task("comprar pan")
+
+    text, keyboard = _render_tomorrow()
+
+    assert "Mañana lo tienes libre" in text
+    assert "comprar pan" not in text
+    assert "PENDIENTES" not in text
+
+
+def test_render_tomorrow_view_weekly_routine_only_shows_when_matches():
+    """WEEKLY:WED solo aparece si mañana es miércoles."""
+    tools.add_event(
+        "Gimnasio", "2026-05-20T19:00:00", "personal", recurring_rule="WEEKLY:WED"
+    )
+
+    # 2026-05-20 es miércoles → debe aparecer
+    text_wed, _ = _render_tomorrow(tomorrow=date(2026, 5, 20))
+    assert "Gimnasio" in text_wed
+
+    # Mañana = jueves 21 → no debe aparecer
+    text_thu, _ = _render_tomorrow(tomorrow=date(2026, 5, 21))
+    assert "Gimnasio" not in text_thu

@@ -101,6 +101,41 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
     return text, keyboard
 
 
+def render_tomorrow_view(tomorrow: date, conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /mañana: eventos y rutinas que tocan mañana. Solo lectura."""
+    day_start = f"{tomorrow.isoformat()}T00:00:00"
+    day_end = f"{tomorrow.isoformat()}T23:59:59"
+
+    events = tools.query_events(day_start, day_end, include_done=True)
+    routines = tools.routine_summary(tomorrow.isoformat(), tomorrow.isoformat())
+    streak_by_id = {r["event_id"]: r["current_streak"] for r in routines}
+
+    one_off = [e for e in events if not e.get("recurring_rule") and e["done"] == 0]
+    recurring = [e for e in events if e.get("recurring_rule") and e["done"] == 0]
+
+    sections: list[str] = []
+
+    if one_off:
+        lines = []
+        for e in one_off:
+            dt = datetime.fromisoformat(e["datetime"])
+            lines.append(f"• {dt.strftime('%H:%M')} — {e['title']}")
+        sections.append("📅 <b>MAÑANA</b>\n" + "\n".join(lines))
+
+    if recurring:
+        lines = []
+        for e in recurring:
+            streak = streak_by_id.get(e["id"], 0)
+            suffix = f" 🔥 {streak}" if streak >= 2 else ""
+            lines.append(f"• {e['title']}{suffix}")
+        sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
+
+    if not sections:
+        return "Mañana lo tienes libre 🌞", None
+
+    return "\n\n".join(sections), None
+
+
 def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     """Vista de /pendientes: una tarea por línea, un botón por tarea."""
     tasks_all = tools.list_tasks(include_done=False)
