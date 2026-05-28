@@ -68,3 +68,120 @@ async def test_ingest_happy_path_returns_reply_and_calls_brain_and_telegram(aioh
     assert call.kwargs["chat_id"] == 42
     assert call.kwargs["text"] == "Listo, <b>Dentista</b> apuntado"
     assert call.kwargs["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_ingest_missing_auth_returns_401(aiohttp_client):
+    app = _build_test_app()
+    client = await aiohttp_client(app)
+
+    resp = await client.post("/ingest", json={"text": "hola"})
+
+    assert resp.status == 401
+    body = await resp.json()
+    assert body["reply"] == "No autorizado"
+    app["brain_fn"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ingest_wrong_token_returns_401(aiohttp_client):
+    app = _build_test_app()
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        json={"text": "hola"},
+        headers={"Authorization": "Bearer wrong"},
+    )
+
+    assert resp.status == 401
+    app["brain_fn"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ingest_malformed_json_returns_400(aiohttp_client):
+    app = _build_test_app()
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        data="not json",
+        headers={
+            "Authorization": f"Bearer {VALID_TOKEN}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert "inválida" in body["reply"].lower() or "falta" in body["reply"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ingest_missing_text_field_returns_400(aiohttp_client):
+    app = _build_test_app()
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        json={"otra_clave": "valor"},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert "falta" in body["reply"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ingest_empty_text_returns_400(aiohttp_client):
+    app = _build_test_app()
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        json={"text": "   "},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
+
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_ingest_brain_exception_returns_500_and_no_telegram(aiohttp_client):
+    def boom(text, user_id=0):
+        raise RuntimeError("boom")
+
+    app = _build_test_app(brain_side_effect=boom)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        json={"text": "hola"},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
+
+    assert resp.status == 500
+    body = await resp.json()
+    assert "fallado" in body["reply"].lower()
+    app["telegram_bot"].send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ingest_telegram_failure_still_returns_200(aiohttp_client):
+    """Si el eco a Telegram falla, Siri sigue recibiendo su 200 con el reply."""
+    app = _build_test_app(
+        brain_reply="ok",
+        send_side_effect=RuntimeError("telegram down"),
+    )
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        json={"text": "hola"},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
+
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["reply"] == "ok"
