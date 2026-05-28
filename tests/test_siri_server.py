@@ -17,6 +17,26 @@ def test_html_to_plain_leaves_plain_text_alone():
     assert siri_server.html_to_plain("texto sin formato") == "texto sin formato"
 
 
+def test_strip_emojis_removes_common_emoji():
+    assert siri_server.strip_emojis("Hola 😊") == "Hola "
+    assert siri_server.strip_emojis("Listo ✅") == "Listo "
+    assert siri_server.strip_emojis("📅 HOY") == " HOY"
+
+
+def test_strip_emojis_handles_multiple_emojis():
+    assert siri_server.strip_emojis("🌅 Buenos días Pablo 💪") == " Buenos días Pablo "
+
+
+def test_strip_emojis_keeps_text_intact():
+    assert siri_server.strip_emojis("texto sin emojis") == "texto sin emojis"
+
+
+def test_strip_emojis_handles_fire_trophy_target():
+    """Cubre los emojis específicos que usa el bot a menudo."""
+    text = "Flexiones 🔥 3 seguidos 🏆 🎯"
+    assert siri_server.strip_emojis(text) == "Flexiones  3 seguidos  "
+
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -165,6 +185,32 @@ async def test_ingest_brain_exception_returns_500_and_no_telegram(aiohttp_client
     body = await resp.json()
     assert "fallado" in body["reply"].lower()
     app["telegram_bot"].send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ingest_strips_emojis_from_siri_reply_but_telegram_keeps_them(aiohttp_client):
+    """Siri lee la respuesta sin emojis; Telegram recibe el HTML con emojis intactos."""
+    app = _build_test_app(brain_reply="🌅 Buenos días <b>Pablo</b> 💪")
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/ingest",
+        json={"text": "saludo"},
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
+
+    assert resp.status == 200
+    body = await resp.json()
+    # Reply para Siri: sin emojis, sin tags HTML
+    assert "🌅" not in body["reply"]
+    assert "💪" not in body["reply"]
+    assert "<b>" not in body["reply"]
+    assert "Buenos días" in body["reply"]
+    assert "Pablo" in body["reply"]
+
+    # Telegram: HTML completo con emojis y tags
+    call = app["telegram_bot"].send_message.await_args
+    assert call.kwargs["text"] == "🌅 Buenos días <b>Pablo</b> 💪"
 
 
 @pytest.mark.asyncio

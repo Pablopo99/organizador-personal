@@ -9,12 +9,28 @@ log = logging.getLogger("siri_server")
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FFFF"   # símbolos y pictogramas, emoticonos, transporte, etc.
+    "\U00002600-\U000027BF"   # misc symbols + dingbats (✅, ⏰, ☀, etc.)
+    "\U00002580-\U000025FF"   # geometric shapes (▼, ▲, 🔲 partial)
+    "\U0001F1E6-\U0001F1FF"   # banderas
+    "]"
+    "[\U0000FE00-\U0000FE0F]?",  # selectores de variación opcionales
+    flags=re.UNICODE,
+)
+
 
 def html_to_plain(text: str) -> str:
     """Quita tags HTML simples y desescapa entidades básicas. Para que Siri pueda leer la respuesta."""
     plain = _TAG_RE.sub("", text)
     plain = plain.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
     return plain
+
+
+def strip_emojis(text: str) -> str:
+    """Elimina emojis del texto. Siri los lee como descripciones (ej. 'carita sonriente') que distraen."""
+    return _EMOJI_RE.sub("", text)
 
 
 def build_app(
@@ -57,7 +73,8 @@ def build_app(
         except Exception:
             log.exception("Error mandando eco a Telegram (Siri ya recibió respuesta)")
 
-        return web.json_response({"reply": html_to_plain(html_reply)}, status=200)
+        siri_text = strip_emojis(html_to_plain(html_reply))
+        return web.json_response({"reply": siri_text}, status=200)
 
     app = web.Application()
     app.router.add_post("/ingest", _on_ingest)
