@@ -11,7 +11,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import tools
 
 
-def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+def render_today_view(
+    today: date, conn, show_completed: bool = False
+) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     today_start = f"{today.isoformat()}T00:00:00"
     today_end = f"{today.isoformat()}T23:59:59"
 
@@ -31,6 +33,10 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
         t for t in tasks_all
         if t["done"] == 1 and (t.get("done_at") or "").startswith(today_prefix)
     ]
+
+    has_completed = bool(hoy_done or rutina_done or task_done_today)
+    completed_count = len(hoy_done) + len(rutina_done) + len(task_done_today)
+    view_letter = "Hc" if show_completed else "H"
 
     sections: list[str] = []
 
@@ -53,7 +59,7 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
         lines = [f"• {t['text']}" for t in task_pending]
         sections.append("📝 <b>PENDIENTES</b>\n" + "\n".join(lines))
 
-    if hoy_done or rutina_done or task_done_today:
+    if show_completed and has_completed:
         lines = []
         for e in hoy_done:
             dt = datetime.fromisoformat(e["datetime"])
@@ -74,30 +80,42 @@ def render_today_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMa
     buttons: list[list[InlineKeyboardButton]] = []
     for e in hoy_pending:
         buttons.append([InlineKeyboardButton(
-            f"🔲 {e['title']}", callback_data=f"mE:{e['id']}"
+            f"🔲 {e['title']}", callback_data=f"mE:{e['id']}:{view_letter}"
         )])
     for e in rutina_pending:
         buttons.append([InlineKeyboardButton(
-            f"🔲 {e['title']}", callback_data=f"mR:{e['id']}"
+            f"🔲 {e['title']}", callback_data=f"mR:{e['id']}:{view_letter}"
         )])
     for t in task_pending:
         buttons.append([InlineKeyboardButton(
-            f"🔲 {t['text']}", callback_data=f"mT:{t['id']}"
-        )])
-    for e in hoy_done:
-        buttons.append([InlineKeyboardButton(
-            f"✅ {e['title']}", callback_data=f"uE:{e['id']}"
-        )])
-    for e in rutina_done:
-        buttons.append([InlineKeyboardButton(
-            f"✅ {e['title']}", callback_data=f"uR:{e['id']}"
-        )])
-    for t in task_done_today:
-        buttons.append([InlineKeyboardButton(
-            f"✅ {t['text']}", callback_data=f"uT:{t['id']}"
+            f"🔲 {t['text']}", callback_data=f"mT:{t['id']}:{view_letter}"
         )])
 
-    keyboard = InlineKeyboardMarkup(buttons)
+    if show_completed:
+        for e in hoy_done:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {e['title']}", callback_data=f"uE:{e['id']}:{view_letter}"
+            )])
+        for e in rutina_done:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {e['title']}", callback_data=f"uR:{e['id']}:{view_letter}"
+            )])
+        for t in task_done_today:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {t['text']}", callback_data=f"uT:{t['id']}:{view_letter}"
+            )])
+
+    if has_completed:
+        if show_completed:
+            buttons.append([InlineKeyboardButton(
+                "▲ Ocultar completados", callback_data="tg:0:H"
+            )])
+        else:
+            buttons.append([InlineKeyboardButton(
+                f"▼ Ver completados ({completed_count})", callback_data="tg:0:Hc"
+            )])
+
+    keyboard = InlineKeyboardMarkup(buttons) if buttons else None
     return text, keyboard
 
 

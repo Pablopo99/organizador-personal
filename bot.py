@@ -255,6 +255,7 @@ _CALLBACK_ACTIONS = {
     "uT": lambda i: tools.uncomplete_task(i),
     "mO": lambda i: tools.mark_objective_done(i),
     "uO": lambda i: tools.unmark_objective_done(i),
+    "tg": lambda i: None,  # toggle de visibilidad: no muta, solo re-renderiza
 }
 
 
@@ -302,8 +303,10 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text, keyboard = views.render_pending_view(conn)
         elif view_letter == "W":
             text, keyboard = views.render_week_view(today, conn)
+        elif view_letter == "Hc":
+            text, keyboard = views.render_today_view(today, conn, show_completed=True)
         else:
-            text, keyboard = views.render_today_view(today, conn)
+            text, keyboard = views.render_today_view(today, conn, show_completed=False)
 
     try:
         await query.edit_message_text(

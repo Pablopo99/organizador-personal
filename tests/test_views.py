@@ -31,6 +31,12 @@ def _render_tomorrow(tomorrow=None):
         return views.render_tomorrow_view(tomorrow, conn)
 
 
+def _render_with_completed(today=None):
+    today = today or date(2026, 5, 19)
+    with db.connect() as conn:
+        return views.render_today_view(today, conn, show_completed=True)
+
+
 def test_render_empty_db_returns_day_libre():
     text, keyboard = _render()
     assert "Día libre" in text
@@ -57,14 +63,14 @@ def test_render_event_done_appears_in_completado_with_check_button():
     e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
     tools.mark_event_done(e["id"])
 
-    text, keyboard = _render()
+    text, keyboard = _render_with_completed()
 
     assert "COMPLETADO HOY" in text
     assert "<s>10:00 — Reunión</s>" in text
-    assert len(keyboard.inline_keyboard) == 1
-    btn = keyboard.inline_keyboard[0][0]
-    assert btn.text.startswith("✅")
-    assert btn.callback_data == f"uE:{e['id']}"
+    btn_texts = [row[0].text for row in keyboard.inline_keyboard]
+    assert any(t.startswith("✅") and "Reunión" in t for t in btn_texts)
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"uE:{e['id']}:Hc" in datas
 
 
 def test_render_routine_pending_in_rutinas_section(monkeypatch):
@@ -78,7 +84,7 @@ def test_render_routine_pending_in_rutinas_section(monkeypatch):
     assert "RUTINAS" in text
     assert "Flexiones" in text
     btn = keyboard.inline_keyboard[0][0]
-    assert btn.callback_data == f"mR:{e['id']}"
+    assert btn.callback_data == f"mR:{e['id']}:H"
 
 
 def test_render_routine_done_today_in_completado_section(monkeypatch):
@@ -87,13 +93,12 @@ def test_render_routine_done_today_in_completado_section(monkeypatch):
     e = tools.add_event("Flexiones", "2026-05-19T08:00:00", "personal", recurring_rule="DAILY")
     tools.mark_event_done(e["id"])
 
-    text, keyboard = _render()
+    text, keyboard = _render_with_completed()
 
     assert "COMPLETADO HOY" in text
     assert "<s>Flexiones" in text
-    btn = keyboard.inline_keyboard[0][0]
-    assert btn.text.startswith("✅")
-    assert btn.callback_data == f"uR:{e['id']}"
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"uR:{e['id']}:Hc" in datas
 
 
 def test_render_routine_with_streak_shows_fire(monkeypatch):
@@ -120,7 +125,7 @@ def test_render_task_pending_with_button():
     assert "PENDIENTES" in text
     assert "comprar pan" in text
     btn = keyboard.inline_keyboard[0][0]
-    assert btn.callback_data == f"mT:{t['id']}"
+    assert btn.callback_data == f"mT:{t['id']}:H"
 
 
 def test_render_task_done_today_in_completado(monkeypatch):
@@ -133,12 +138,12 @@ def test_render_task_done_today_in_completado(monkeypatch):
             ("2026-05-19T10:00:00", t["id"]),
         )
 
-    text, keyboard = _render()
+    text, keyboard = _render_with_completed()
 
     assert "COMPLETADO HOY" in text
     assert "<s>comprar pan</s>" in text
-    btn = keyboard.inline_keyboard[0][0]
-    assert btn.callback_data == f"uT:{t['id']}"
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"uT:{t['id']}:Hc" in datas
 
 
 def test_render_task_done_yesterday_not_shown(monkeypatch):
@@ -309,19 +314,22 @@ def test_render_week_view_objectives_filtered_by_current_week():
 
 
 def test_render_full_mix_keyboard_order():
-    """Orden: pendientes primero (events, rutinas, tareas), luego completados."""
+    """Con COMPLETADO mostrado, orden: pendientes primero, luego completados, luego toggle."""
     tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
     e_done = tools.add_event("Cita", "2026-05-19T11:00:00", "work")
     tools.mark_event_done(e_done["id"])
 
-    text, keyboard = _render()
+    text, keyboard = _render_with_completed()
 
     btn_texts = [row[0].text for row in keyboard.inline_keyboard]
 
+    # Primero el pendiente
     assert btn_texts[0].startswith("🔲")
     assert "Reunión" in btn_texts[0]
-    assert btn_texts[-1].startswith("✅")
-    assert "Cita" in btn_texts[-1]
+    # En medio el completado
+    assert any(t.startswith("✅") and "Cita" in t for t in btn_texts)
+    # Al final el toggle "Ocultar completados"
+    assert "Ocultar completados" in btn_texts[-1]
 
 
 def test_render_tomorrow_view_empty_returns_libre():
@@ -369,6 +377,85 @@ def test_render_tomorrow_view_does_not_show_pendientes():
     assert "Mañana lo tienes libre" in text
     assert "comprar pan" not in text
     assert "PENDIENTES" not in text
+
+
+def test_render_today_view_default_hides_completado_section():
+    """Por defecto la sección COMPLETADO no se muestra; en su lugar, un botón."""
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(e["id"])
+    tools.add_event("Cita", "2026-05-19T15:00:00", "work")  # pendiente
+
+    text, keyboard = _render()
+
+    assert "COMPLETADO" not in text
+    # Sí está la sección HOY con la pendiente
+    assert "Cita" in text
+    # Hay botón de "Ver completados"
+    btn_texts = [row[0].text for row in keyboard.inline_keyboard]
+    assert any("Ver completados" in t for t in btn_texts)
+    # Y no hay botón ✅ del item completado (porque la sección está oculta)
+    assert not any(b.startswith("✅") for b in btn_texts)
+
+
+def test_render_today_view_show_completed_true_shows_section_and_undo_buttons():
+    e_done = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(e_done["id"])
+
+    today = date(2026, 5, 19)
+    with db.connect() as conn:
+        text, keyboard = views.render_today_view(today, conn, show_completed=True)
+
+    assert "COMPLETADO HOY" in text
+    assert "<s>10:00 — Reunión</s>" in text
+    btn_texts = [row[0].text for row in keyboard.inline_keyboard]
+    # Botón ✅ presente para deshacer
+    assert any(t.startswith("✅") and "Reunión" in t for t in btn_texts)
+    # Y botón "Ocultar completados"
+    assert any("Ocultar completados" in t for t in btn_texts)
+
+
+def test_render_today_view_no_completed_items_no_toggle_button():
+    """Si no hay nada hecho, el botón de toggle no aparece."""
+    tools.add_event("Pendiente", "2026-05-19T10:00:00", "work")
+
+    text, keyboard = _render()
+
+    btn_texts = [row[0].text for row in keyboard.inline_keyboard]
+    assert not any("completados" in t.lower() for t in btn_texts)
+
+
+def test_render_today_view_toggle_button_callback_data():
+    """El callback del toggle codifica el siguiente estado (Hc para mostrar)."""
+    tools.add_event("Pendiente", "2026-05-19T09:00:00", "work")  # para que haya botones
+    e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(e["id"])
+
+    text, keyboard = _render()  # show_completed=False por defecto
+
+    toggle_btn = None
+    for row in keyboard.inline_keyboard:
+        if "Ver completados" in row[0].text:
+            toggle_btn = row[0]
+            break
+    assert toggle_btn is not None
+    assert toggle_btn.callback_data == "tg:0:Hc"
+
+
+def test_render_today_view_show_completed_action_buttons_use_Hc_view_letter():
+    """Cuando COMPLETADO está visible, los botones de acción usan vista Hc."""
+    e_pending = tools.add_event("Pendiente", "2026-05-19T15:00:00", "work")
+    e_done = tools.add_event("Hecho", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(e_done["id"])
+
+    today = date(2026, 5, 19)
+    with db.connect() as conn:
+        _, keyboard = views.render_today_view(today, conn, show_completed=True)
+
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    # El botón de la pendiente usa Hc
+    assert f"mE:{e_pending['id']}:Hc" in datas
+    # El botón de la hecha también usa Hc
+    assert f"uE:{e_done['id']}:Hc" in datas
 
 
 def test_render_tomorrow_view_weekly_routine_only_shows_when_matches():
