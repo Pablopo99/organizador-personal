@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -120,15 +120,27 @@ def process_voice_transcription(transcription: str, from_user_id: int) -> Option
         )
 
 
+def _calendar_button_keyboard(user_id: int):
+    """Si brain dejó un event_id pendiente, devuelve un teclado con el botón.
+    Si no, None.
+    """
+    event_id = brain.pop_pending_calendar_button(user_id)
+    if event_id is None:
+        return None
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📅 Mandar a Calendar", callback_data=f"gc:{event_id}"),
+    ]])
+
+
 async def _on_message(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
-    reply = process_incoming(
-        text=update.message.text,
-        from_user_id=update.effective_user.id,
-    )
-    if reply is not None:
-        await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
+    user_id = update.effective_user.id
+    reply = process_incoming(text=update.message.text, from_user_id=user_id)
+    if reply is None:
+        return
+    keyboard = _calendar_button_keyboard(user_id)
+    await update.message.reply_text(reply, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
 async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,8 +178,10 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     reply = process_voice_transcription(transcription, from_user_id=from_user_id)
-    if reply is not None:
-        await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
+    if reply is None:
+        return
+    keyboard = _calendar_button_keyboard(from_user_id)
+    await update.message.reply_text(reply, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
 async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -256,6 +270,7 @@ _CALLBACK_ACTIONS = {
     "mO": lambda i: tools.mark_objective_done(i),
     "uO": lambda i: tools.unmark_objective_done(i),
     "tg": lambda i: None,  # toggle de visibilidad: no muta, solo re-renderiza
+    "gc": lambda i: tools.push_event_to_calendar(i),
 }
 
 
@@ -296,6 +311,20 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
         handler(item_id)
     except Exception:
         log.exception("Error aplicando mutación de callback %s", data)
+
+    if action_type == "gc":
+        try:
+            # Quitamos el teclado y mantenemos el texto original con un sufijo.
+            original = query.message.text_html if query.message else ""
+            await query.edit_message_text(
+                f"{original}\n\n✅ Enviado a Calendar",
+                parse_mode=ParseMode.HTML,
+                reply_markup=None,
+            )
+        except BadRequest:
+            log.warning("No pude editar el mensaje del botón Calendar")
+        await query.answer("Enviado a Calendar")
+        return
 
     today = date_utils.today_madrid()
     with db.connect() as conn:

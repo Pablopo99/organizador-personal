@@ -435,3 +435,16 @@ async def test_callback_old_format_no_view_suffix_defaults_to_hoy(temp_db_for_bo
         row = conn.execute("SELECT done FROM events WHERE id = ?", (e["id"],)).fetchone()
     assert row[0] == 1
     query.edit_message_text.assert_called_once()
+
+
+def test_callback_action_gc_calls_push_event_to_calendar(monkeypatch):
+    import bot
+    called = {}
+    def fake_push(event_id):
+        called["event_id"] = event_id
+        return {"event_id": event_id, "synced": True, "gcal_event_id": "g1"}
+    monkeypatch.setattr(bot.tools, "push_event_to_calendar", fake_push)
+    handler = bot._CALLBACK_ACTIONS["gc"]
+    result = handler(99)
+    assert called["event_id"] == 99
+    assert result["synced"] is True

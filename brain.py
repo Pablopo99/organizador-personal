@@ -14,6 +14,28 @@ _MAX_TURNS_IN_HISTORY = 15
 # Historial conversacional por usuario. En memoria — se pierde al reiniciar el bot.
 _history: dict[int, list[dict]] = {}
 
+# Event id pendiente de "ofrecer botón Mandar a Calendar" por usuario.
+# Se rellena cuando Claude llama a add_event sin sincronizar y se vacía cuando
+# bot.py lee el registro (o cuando Claude llama a push_event_to_calendar).
+_pending_calendar_button: dict[int, int] = {}
+
+
+def record_pending_calendar_button(user_id: int, event_id: int) -> None:
+    _pending_calendar_button[user_id] = event_id
+
+
+def pop_pending_calendar_button(user_id: int) -> int | None:
+    return _pending_calendar_button.pop(user_id, None)
+
+
+def clear_pending_calendar_button(user_id: int) -> None:
+    _pending_calendar_button.pop(user_id, None)
+
+
+def reset_calendar_button(user_id: int) -> None:
+    """Alias semántico para tests."""
+    clear_pending_calendar_button(user_id)
+
 
 def _system_prompt() -> str:
     now = datetime.now().isoformat(timespec="minutes")
@@ -145,6 +167,15 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
                     continue
                 try:
                     result = tools.dispatch(block.name, dict(block.input))
+                    if (
+                        block.name == "add_event"
+                        and isinstance(result, dict)
+                        and "id" in result
+                        and "gcal_event_id" not in result  # ya sincronizado en línea
+                    ):
+                        record_pending_calendar_button(user_id, result["id"])
+                    elif block.name == "push_event_to_calendar":
+                        clear_pending_calendar_button(user_id)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,

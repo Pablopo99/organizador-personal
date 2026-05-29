@@ -157,3 +157,26 @@ def test_system_prompt_includes_rutinas_section():
 def test_system_prompt_mentions_streak_emoji():
     prompt = brain._system_prompt()
     assert "🔥" in prompt
+
+
+def test_pending_calendar_button_starts_empty():
+    import brain
+    brain.reset_calendar_button(42)
+    assert brain.pop_pending_calendar_button(42) is None
+
+
+def test_record_then_pop_calendar_button():
+    import brain
+    brain.reset_calendar_button(42)
+    brain.record_pending_calendar_button(42, event_id=7)
+    assert brain.pop_pending_calendar_button(42) == 7
+    # tras pop, queda vacío
+    assert brain.pop_pending_calendar_button(42) is None
+
+
+def test_push_event_to_calendar_clears_pending():
+    import brain
+    brain.reset_calendar_button(42)
+    brain.record_pending_calendar_button(42, event_id=7)
+    brain.clear_pending_calendar_button(42)
+    assert brain.pop_pending_calendar_button(42) is None
