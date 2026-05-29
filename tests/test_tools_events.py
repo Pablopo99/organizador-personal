@@ -1,5 +1,6 @@
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
@@ -647,3 +648,56 @@ def test_routine_summary_no_completions_zero_streaks(monkeypatch):
     flex = [r for r in summary if r["title"] == "F"][0]
     assert flex["current_streak"] == 0
     assert flex["best_streak"] == 0
+
+
+def test_update_event_propagates_to_calendar_when_synced():
+    created = tools.add_event("Reu", "2026-05-29T10:00:00", "work")
+    # Marcar la fila como sincronizada (simula que pasó por push_event_to_calendar)
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET gcal_event_id = ? WHERE id = ?",
+            ("gcal-1", created["id"]),
+        )
+
+    with patch("tools.gcal_sync.update_event") as upd:
+        tools.update_event(created["id"], {"title": "Reu nueva"})
+
+    upd.assert_called_once_with("gcal-1", {"title": "Reu nueva"})
+
+
+def test_update_event_does_not_call_gcal_when_not_synced():
+    created = tools.add_event("Sin sync", "2026-05-29T10:00:00", "work")
+    with patch("tools.gcal_sync.update_event") as upd:
+        tools.update_event(created["id"], {"title": "Otro"})
+    upd.assert_not_called()
+
+
+def test_update_event_swallows_gcal_errors():
+    created = tools.add_event("Reu", "2026-05-29T10:00:00", "work")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET gcal_event_id = ? WHERE id = ?",
+            ("gcal-x", created["id"]),
+        )
+    with patch("tools.gcal_sync.update_event", side_effect=RuntimeError("boom")):
+        result = tools.update_event(created["id"], {"title": "Reu2"})
+    assert result["updated"] == 1  # update local sí funcionó
+
+
+def test_delete_event_propagates_to_calendar_when_synced():
+    created = tools.add_event("Borrar", "2026-05-29T10:00:00", "work")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET gcal_event_id = ? WHERE id = ?",
+            ("gcal-d", created["id"]),
+        )
+    with patch("tools.gcal_sync.delete_event") as dl:
+        tools.delete_event(created["id"])
+    dl.assert_called_once_with("gcal-d")
+
+
+def test_delete_event_does_not_call_gcal_when_not_synced():
+    created = tools.add_event("X", "2026-05-29T10:00:00", "work")
+    with patch("tools.gcal_sync.delete_event") as dl:
+        tools.delete_event(created["id"])
+    dl.assert_not_called()

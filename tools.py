@@ -1,10 +1,14 @@
 """Herramientas que Claude puede invocar. Operan sobre SQLite."""
+import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 import db
+import gcal_sync
 from config import CATEGORIES
 from date_utils import now_iso
+
+log = logging.getLogger("tools")
 
 _WEEKDAY_MAP = {
     "MON": 0, "TUE": 1, "WED": 2, "THU": 3,
@@ -135,12 +139,36 @@ def update_event(event_id: int, fields: dict) -> dict:
         cur = conn.execute(
             f"UPDATE events SET {', '.join(sets)} WHERE id = ?", params
         )
-        return {"id": event_id, "updated": cur.rowcount}
+        gcal_id_row = conn.execute(
+            "SELECT gcal_event_id FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+
+    result = {"id": event_id, "updated": cur.rowcount}
+
+    gcal_event_id = gcal_id_row["gcal_event_id"] if gcal_id_row else None
+    if gcal_event_id:
+        try:
+            gcal_sync.update_event(gcal_event_id, fields)
+        except Exception:
+            log.exception("Error propagando update_event a Calendar (event_id=%s)", event_id)
+
+    return result
 
 
 def delete_event(event_id: int) -> dict:
     with db.connect() as conn:
+        gcal_id_row = conn.execute(
+            "SELECT gcal_event_id FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
         cur = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+
+    gcal_event_id = gcal_id_row["gcal_event_id"] if gcal_id_row else None
+    if gcal_event_id:
+        try:
+            gcal_sync.delete_event(gcal_event_id)
+        except Exception:
+            log.exception("Error propagando delete_event a Calendar (event_id=%s)", event_id)
+
     return {"id": event_id, "deleted": cur.rowcount}
 
 
