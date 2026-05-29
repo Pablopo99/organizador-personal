@@ -27,6 +27,10 @@ _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _API_BASE = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 
 
+class NotConnected(Exception):
+    """No hay tokens guardados — el usuario debe autorizar."""
+
+
 def get_tokens() -> Optional[dict]:
     """Devuelve el dict de tokens guardados o None si no hay."""
     with db.connect() as conn:
@@ -103,3 +107,36 @@ def exchange_code(code: str) -> None:
         refresh_token=payload["refresh_token"],
         expires_at=expires_at,
     )
+
+
+def ensure_valid_token() -> str:
+    """Devuelve un access_token válido. Renueva con refresh_token si toca."""
+    tokens = get_tokens()
+    if tokens is None:
+        raise NotConnected("No hay tokens guardados.")
+
+    expires_at = datetime.fromisoformat(tokens["expires_at"])
+    if expires_at - now_madrid_naive() > timedelta(minutes=5):
+        return tokens["access_token"]
+
+    response = requests.post(
+        _TOKEN_URL,
+        data={
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": tokens["refresh_token"],
+            "grant_type": "refresh_token",
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    new_expires = (
+        now_madrid_naive() + timedelta(seconds=int(payload["expires_in"]))
+    ).isoformat(timespec="seconds")
+    save_tokens(
+        access_token=payload["access_token"],
+        refresh_token=tokens["refresh_token"],  # Google no devuelve refresh nuevo en este flow
+        expires_at=new_expires,
+    )
+    return payload["access_token"]

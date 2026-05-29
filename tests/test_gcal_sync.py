@@ -103,3 +103,51 @@ def test_exchange_code_persists_tokens(monkeypatch):
     saved = gcal_sync.get_tokens()
     assert saved["access_token"] == "at-abc"
     assert saved["refresh_token"] == "rt-abc"
+
+
+from datetime import timedelta
+
+
+def test_ensure_valid_token_returns_existing_when_fresh(monkeypatch):
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_SECRET", "csecret")
+    future = (gcal_sync.now_madrid_naive() + timedelta(hours=1)).isoformat(timespec="seconds")
+    gcal_sync.save_tokens("at-current", "rt-current", future)
+
+    with patch("gcal_sync.requests.post") as post:
+        token = gcal_sync.ensure_valid_token()
+
+    assert token == "at-current"
+    post.assert_not_called()
+
+
+def test_ensure_valid_token_refreshes_when_near_expiry(monkeypatch):
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_SECRET", "csecret")
+    past = (gcal_sync.now_madrid_naive() + timedelta(minutes=2)).isoformat(timespec="seconds")
+    gcal_sync.save_tokens("at-old", "rt-keep", past)
+
+    fake_payload = {"access_token": "at-new", "expires_in": 3600}
+
+    def fake_post(url, data, timeout):
+        assert data["refresh_token"] == "rt-keep"
+        assert data["grant_type"] == "refresh_token"
+        class R:
+            def json(self_inner):
+                return fake_payload
+            def raise_for_status(self_inner):
+                pass
+        return R()
+
+    with patch("gcal_sync.requests.post", side_effect=fake_post):
+        token = gcal_sync.ensure_valid_token()
+
+    assert token == "at-new"
+    saved = gcal_sync.get_tokens()
+    assert saved["access_token"] == "at-new"
+    assert saved["refresh_token"] == "rt-keep"  # se conserva
+
+
+def test_ensure_valid_token_raises_when_no_tokens():
+    with pytest.raises(gcal_sync.NotConnected):
+        gcal_sync.ensure_valid_token()
