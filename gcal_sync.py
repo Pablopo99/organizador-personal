@@ -202,3 +202,54 @@ def delete_event(gcal_event_id: str) -> None:
         log.warning("Evento %s ya no existe en Calendar, asumimos éxito", gcal_event_id)
         return
     response.raise_for_status()
+
+
+def register_oauth_routes(app, *, telegram_bot, allowed_user_id: int) -> None:
+    """Monta `/oauth/callback` en la aiohttp Application dada.
+
+    `telegram_bot` debe tener un método async `send_message(chat_id, text, parse_mode)`.
+    `allowed_user_id` es el único user al que le notificamos el éxito.
+    """
+    from aiohttp import web
+
+    async def _on_callback(request):
+        if "error" in request.query:
+            log.warning("OAuth callback con error: %s", request.query["error"])
+            return web.Response(
+                text="<h1>Autorización denegada</h1><p>Vuelve a Telegram y prueba otra vez.</p>",
+                status=400,
+                content_type="text/html",
+            )
+        code = request.query.get("code")
+        if not code:
+            return web.Response(
+                text="<h1>Falta el código</h1>",
+                status=400,
+                content_type="text/html",
+            )
+        try:
+            exchange_code(code)
+        except Exception:
+            log.exception("Error intercambiando código OAuth")
+            return web.Response(
+                text="<h1>Algo ha fallado</h1><p>Vuelve a Telegram e inténtalo en un momento.</p>",
+                status=500,
+                content_type="text/html",
+            )
+
+        try:
+            await telegram_bot.send_message(
+                chat_id=allowed_user_id,
+                text="✅ Calendar conectado. Ya puedo mandar tus eventos a Google Calendar.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            log.exception("Error notificando éxito de OAuth en Telegram")
+
+        return web.Response(
+            text="<h1>✅ Calendar conectado</h1><p>Vuelve a Telegram.</p>",
+            status=200,
+            content_type="text/html",
+        )
+
+    app.router.add_get("/oauth/callback", _on_callback)

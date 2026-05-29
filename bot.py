@@ -403,6 +403,12 @@ async def _async_main() -> None:
         siri_token=SIRI_TOKEN,
         allowed_user_id=ALLOWED_USER_ID,
     )
+    import gcal_sync
+    gcal_sync.register_oauth_routes(
+        siri_app,
+        telegram_bot=app.bot,
+        allowed_user_id=ALLOWED_USER_ID,
+    )
     runner = web.AppRunner(siri_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8080)
