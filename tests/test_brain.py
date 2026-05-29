@@ -180,3 +180,12 @@ def test_push_event_to_calendar_clears_pending():
     brain.record_pending_calendar_button(42, event_id=7)
     brain.clear_pending_calendar_button(42)
     assert brain.pop_pending_calendar_button(42) is None
+
+
+def test_system_prompt_mentions_calendar_tools():
+    import brain
+    prompt = brain._system_prompt()
+    assert "push_event_to_calendar" in prompt
+    assert "connect_calendar" in prompt
+    # Frases-trigger esperadas
+    assert "calendar" in prompt.lower()
