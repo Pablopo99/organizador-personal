@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS routine_completions (
 
 CREATE INDEX IF NOT EXISTS idx_routine_completions_date
     ON routine_completions(completion_date);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    provider      TEXT PRIMARY KEY,
+    access_token  TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
 """
 
 
@@ -72,6 +80,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     tasks_cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
     if "done_at" not in tasks_cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN done_at TEXT")
+
+
+    if "gcal_event_id" not in events_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN gcal_event_id TEXT")
 
     tables = [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"

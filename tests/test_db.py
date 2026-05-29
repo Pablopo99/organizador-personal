@@ -230,3 +230,35 @@ def test_routine_completions_unique_per_event_per_date(temp_db):
                 "INSERT INTO routine_completions (event_id, completion_date, created_at) VALUES (?, '2026-05-19', '2026-05-19T08:30:00')",
                 (event_id,),
             )
+
+def test_init_schema_adds_gcal_event_id_column(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "x.db"))
+    db.init_schema()
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    assert "gcal_event_id" in cols
+
+
+def test_init_schema_creates_oauth_tokens_table(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "x.db"))
+    db.init_schema()
+    with db.connect() as conn:
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+    assert "oauth_tokens" in tables
+
+
+def test_oauth_tokens_provider_is_primary_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "x.db"))
+    db.init_schema()
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at, created_at)"
+            " VALUES ('google', 'a', 'r', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+        )
+        with pytest.raises(Exception):
+            conn.execute(
+                "INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at, created_at)"
+                " VALUES ('google', 'b', 'r2', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+            )
