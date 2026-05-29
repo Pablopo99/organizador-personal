@@ -24,6 +24,7 @@ def add_event(
     category: str,
     recurring_rule: Optional[str] = None,
     notes: Optional[str] = None,
+    sync_to_calendar: bool = False,
 ) -> dict:
     if category not in CATEGORIES:
         raise ValueError(
@@ -38,7 +39,33 @@ def add_event(
             (title, datetime_iso, category, recurring_rule, notes, now_iso()),
         )
         new_id = cur.lastrowid
-    return {"id": new_id, "title": title, "datetime": datetime_iso}
+
+    result = {"id": new_id, "title": title, "datetime": datetime_iso}
+
+    if sync_to_calendar:
+        try:
+            gcal_id = gcal_sync.push_event({
+                "title": title,
+                "datetime": datetime_iso,
+                "category": category,
+                "notes": notes,
+            })
+        except gcal_sync.NotConnected:
+            result["sync_error"] = "not_connected"
+            return result
+        except Exception:
+            log.exception("Error en sync_to_calendar para add_event %s", new_id)
+            result["sync_error"] = "api_error"
+            return result
+
+        with db.connect() as conn:
+            conn.execute(
+                "UPDATE events SET gcal_event_id = ? WHERE id = ?",
+                (gcal_id, new_id),
+            )
+        result["gcal_event_id"] = gcal_id
+
+    return result
 
 
 def query_events(
@@ -170,6 +197,58 @@ def delete_event(event_id: int) -> dict:
             log.exception("Error propagando delete_event a Calendar (event_id=%s)", event_id)
 
     return {"id": event_id, "deleted": cur.rowcount}
+
+
+def push_event_to_calendar(event_id: int) -> dict:
+    """Sincroniza un evento existente con Google Calendar.
+
+    - Si ya está sincronizado, no hace nada (idempotente).
+    - Si Pablo no ha autorizado todavía, devuelve error 'not_connected'.
+    - Guarda el gcal_event_id en la fila.
+    """
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT id, title, datetime, category, notes, gcal_event_id"
+            " FROM events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+
+    if row is None:
+        return {"event_id": event_id, "synced": False, "error": "not_found"}
+
+    if row["gcal_event_id"]:
+        return {
+            "event_id": event_id,
+            "synced": True,
+            "already_synced": True,
+            "gcal_event_id": row["gcal_event_id"],
+        }
+
+    try:
+        gcal_id = gcal_sync.push_event({
+            "title": row["title"],
+            "datetime": row["datetime"],
+            "category": row["category"],
+            "notes": row["notes"],
+        })
+    except gcal_sync.NotConnected:
+        return {"event_id": event_id, "synced": False, "error": "not_connected"}
+    except Exception:
+        log.exception("Error pushing event %s a Calendar", event_id)
+        return {"event_id": event_id, "synced": False, "error": "api_error"}
+
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET gcal_event_id = ? WHERE id = ?",
+            (gcal_id, event_id),
+        )
+
+    return {"event_id": event_id, "gcal_event_id": gcal_id, "synced": True}
+
+
+def connect_calendar() -> dict:
+    """Devuelve la URL OAuth para que el usuario autorice."""
+    return {"auth_url": gcal_sync.oauth_start_url()}
 
 
 def mark_event_done(event_id: int) -> dict:
@@ -518,6 +597,15 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
                 "recurring_rule": {"type": ["string", "null"]},
                 "notes": {"type": ["string", "null"]},
+                "sync_to_calendar": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Si es true, además de añadir el evento al bot, lo manda a "
+                        "Google Calendar. Úsala SOLO cuando el usuario lo pida "
+                        "explícitamente ('mételo en el calendario' y similares)."
+                    ),
+                },
             },
             "required": ["title", "datetime_iso", "category"],
         },
@@ -657,6 +745,31 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["task_id"],
         },
     },
+    {
+        "name": "push_event_to_calendar",
+        "description": (
+            "Sincroniza un evento existente con Google Calendar. Úsala cuando "
+            "Pablo diga 'mételo en el calendario', 'pásalo a Google Calendar', "
+            "'manda al calendario' o variantes, o justo después de add_event si "
+            "el mismo mensaje pedía sincronizar. Si devuelve error 'not_connected', "
+            "avisa al usuario de que ejecute 'conecta con calendar'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"event_id": {"type": "integer"}},
+            "required": ["event_id"],
+        },
+    },
+    {
+        "name": "connect_calendar",
+        "description": (
+            "Devuelve la URL de autorización OAuth para conectar el bot con "
+            "Google Calendar. Úsala cuando Pablo diga 'conecta con calendar', "
+            "'autoriza Google Calendar', o cuando push_event_to_calendar haya "
+            "devuelto error 'not_connected'."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -673,6 +786,8 @@ _DISPATCH = {
     "add_task": add_task,
     "list_tasks": list_tasks,
     "complete_task": complete_task,
+    "push_event_to_calendar": push_event_to_calendar,
+    "connect_calendar": connect_calendar,
 }
 
 

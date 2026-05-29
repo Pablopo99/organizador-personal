@@ -47,3 +47,16 @@ def test_routine_summary_is_registered():
     names = [t["name"] for t in tools.TOOL_DEFINITIONS]
     assert "routine_summary" in names
     assert "routine_summary" in tools._DISPATCH
+
+
+def test_dispatch_includes_calendar_tools():
+    import tools
+    assert "push_event_to_calendar" in tools._DISPATCH
+    assert "connect_calendar" in tools._DISPATCH
+
+
+def test_tool_definitions_include_calendar_tools():
+    import tools
+    names = [t["name"] for t in tools.TOOL_DEFINITIONS]
+    assert "push_event_to_calendar" in names
+    assert "connect_calendar" in names

@@ -701,3 +701,82 @@ def test_delete_event_does_not_call_gcal_when_not_synced():
     with patch("tools.gcal_sync.delete_event") as dl:
         tools.delete_event(created["id"])
     dl.assert_not_called()
+
+
+def test_add_event_with_sync_to_calendar_true_pushes_and_stores_gcal_id():
+    with patch("tools.gcal_sync.push_event", return_value="gcal-sync-1") as p:
+        result = tools.add_event(
+            "Reu", "2026-05-29T10:00:00", "work", sync_to_calendar=True
+        )
+    p.assert_called_once()
+    assert result["gcal_event_id"] == "gcal-sync-1"
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT gcal_event_id FROM events WHERE id = ?", (result["id"],)
+        ).fetchone()
+    assert row["gcal_event_id"] == "gcal-sync-1"
+
+
+def test_add_event_default_does_not_call_calendar():
+    with patch("tools.gcal_sync.push_event") as p:
+        tools.add_event("Reu", "2026-05-29T10:00:00", "work")
+    p.assert_not_called()
+
+
+def test_add_event_with_sync_not_connected_returns_unsynced_but_keeps_event():
+    import gcal_sync
+    with patch("tools.gcal_sync.push_event", side_effect=gcal_sync.NotConnected()):
+        result = tools.add_event(
+            "Reu", "2026-05-29T10:00:00", "work", sync_to_calendar=True
+        )
+    assert "id" in result
+    assert result.get("sync_error") == "not_connected"
+
+
+def test_push_event_to_calendar_writes_gcal_id_and_returns_ok():
+    created = tools.add_event("Cena", "2026-05-29T21:00:00", "personal")
+
+    with patch("tools.gcal_sync.push_event", return_value="gcal-cena-1"):
+        result = tools.push_event_to_calendar(created["id"])
+
+    assert result == {"event_id": created["id"], "gcal_event_id": "gcal-cena-1", "synced": True}
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT gcal_event_id FROM events WHERE id = ?", (created["id"],)
+        ).fetchone()
+    assert row["gcal_event_id"] == "gcal-cena-1"
+
+
+def test_push_event_to_calendar_is_idempotent_when_already_synced():
+    created = tools.add_event("Cita", "2026-05-29T10:00:00", "medical")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET gcal_event_id = ? WHERE id = ?",
+            ("gcal-already", created["id"]),
+        )
+
+    with patch("tools.gcal_sync.push_event") as p:
+        result = tools.push_event_to_calendar(created["id"])
+
+    p.assert_not_called()
+    assert result["already_synced"] is True
+    assert result["gcal_event_id"] == "gcal-already"
+
+
+def test_push_event_to_calendar_raises_friendly_when_not_connected():
+    created = tools.add_event("Cita", "2026-05-29T10:00:00", "medical")
+    import gcal_sync
+    with patch("tools.gcal_sync.push_event", side_effect=gcal_sync.NotConnected()):
+        result = tools.push_event_to_calendar(created["id"])
+    assert result == {"event_id": created["id"], "synced": False, "error": "not_connected"}
+
+
+def test_push_event_to_calendar_unknown_event_id():
+    result = tools.push_event_to_calendar(99999)
+    assert result == {"event_id": 99999, "synced": False, "error": "not_found"}
+
+
+def test_connect_calendar_returns_auth_url():
+    with patch("tools.gcal_sync.oauth_start_url", return_value="https://example/auth?x=1"):
+        result = tools.connect_calendar()
+    assert result == {"auth_url": "https://example/auth?x=1"}
