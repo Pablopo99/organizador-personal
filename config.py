@@ -28,6 +28,15 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 SIRI_TOKEN = _require("SIRI_TOKEN")
 
+# Credenciales OAuth de Google Calendar. Si están vacías, la sincronización
+# con Calendar queda deshabilitada (el bot sigue funcionando normal).
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get(
+    "GOOGLE_REDIRECT_URI",
+    "https://mi-secretaria-pablo.fly.dev/oauth/callback",
+)
+
 TIMEZONE = "Europe/Madrid"
 DB_PATH = os.environ.get("DB_PATH") or str(_PROJECT_ROOT / "organizador.db")
 CATEGORIES = ("medical", "work", "personal", "other")
