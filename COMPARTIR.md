@@ -307,6 +307,88 @@ flyctl secrets list --app TU-NOMBRE-AQUI
 
 ---
 
+## Apéndice C: Sincronización con Google Calendar (opcional, ~15 min)
+
+Si quieres que el bot mande tus eventos a tu Google Calendar, sigue estos pasos. **Es opcional**: el bot funciona perfectamente sin esto, simplemente no podrá enviar nada a Calendar.
+
+Cómo funciona una vez configurado:
+- Tú decides cuándo se sincroniza un evento: o lo dices al apuntarlo (*"apunta dentista mañana 10 y mételo en el calendario"*) o lo apuntas sin más y luego tocas el botón inline `📅 Mandar a Calendar` que aparece en la confirmación.
+- Si editas o borras un evento ya sincronizado, el cambio se propaga automáticamente a Calendar.
+- Es de un solo sentido: bot → Calendar. Eventos creados directamente en Calendar **no** aparecen en el bot.
+
+### C1. Crear un proyecto en Google Cloud (3 min)
+
+1. Entra en [console.cloud.google.com](https://console.cloud.google.com) con la cuenta de Google del Calendar al que quieras enviar los eventos.
+2. Arriba a la izquierda, junto al logo de Google Cloud, despliega el selector de proyectos y pulsa **"Proyecto nuevo"**.
+3. Ponle un nombre tipo *"Mi Secretaria"* (solo lo verás tú). Crea.
+4. Espera a que cargue y asegúrate de que estás dentro del nuevo proyecto (mira arriba a la izquierda).
+
+### C2. Habilitar la API de Calendar (1 min)
+
+1. En la barra de búsqueda de arriba, escribe **"Google Calendar API"** y entra en el resultado.
+2. Pulsa **"Habilitar"** / **"Enable"**. Espera unos segundos.
+
+### C3. Configurar la pantalla de consentimiento OAuth (3 min)
+
+1. En el menú lateral izquierdo busca **"APIs y servicios"** → **"Google Auth Platform"** → **"Información de la marca"** (Branding). En interfaces nuevas puede aparecer directamente como **"Google Auth Platform"** en el menú.
+2. Elige tipo de usuario **"Externo"** (External) y pulsa **Crear**.
+3. Rellena:
+   - **Nombre de la aplicación**: lo que quieras (ej. *"Mi Secretaria"*).
+   - **Email de soporte de usuario**: tu email.
+   - **Datos de contacto del desarrollador**: tu email.
+4. Guarda.
+5. En la sección **"Scopes"** / **"Permisos"**, añade manualmente el scope:
+   ```
+   https://www.googleapis.com/auth/calendar.events
+   ```
+   Es el mínimo que necesita el bot (solo eventos, no lee otros datos de tu cuenta).
+6. **MUY IMPORTANTE** — en la sección **"Público"** / **"Test users"**, pulsa **"Add users"** y añade tu propio email de Gmail. Si te saltas este paso, al intentar autorizar verás un error *"Acceso bloqueado: no has completado el proceso de verificación"*.
+
+### C4. Crear las credenciales OAuth 2.0 (2 min)
+
+1. En el menú, ve a **"Clientes"** (Credentials → OAuth 2.0 client IDs).
+2. Pulsa **"Crear cliente"** / **"Create client"**.
+3. Tipo: **"Aplicación web"** (Web application).
+4. Nombre: lo que quieras (ej. *"Bot Telegram"*).
+5. En **"URIs de redireccionamiento autorizadas"**, añade exactamente:
+   ```
+   https://TU-NOMBRE-AQUI.fly.dev/oauth/callback
+   ```
+   (Reemplazando `TU-NOMBRE-AQUI` por el nombre que le pusiste a tu app de Fly en el Paso 7.)
+6. Crea. Te enseñará el **Client ID** y el **Client Secret**. Cópialos a un sitio seguro inmediatamente.
+
+### C5. Meter las credenciales como secrets de Fly (1 min)
+
+```bash
+flyctl secrets set --app TU-NOMBRE-AQUI \
+  GOOGLE_CLIENT_ID='TU-CLIENT-ID-AQUI' \
+  GOOGLE_CLIENT_SECRET='TU-CLIENT-SECRET-AQUI'
+```
+
+Cambiar los secrets reinicia la máquina automáticamente. Espera 30 segundos a que arranque.
+
+### C6. Conectar desde Telegram (1 min)
+
+1. Abre el chat con tu bot en Telegram.
+2. Escribe:
+   ```
+   conecta con calendar
+   ```
+3. El bot te responderá con un enlace. Tócalo.
+4. Se abre el navegador → pantalla de Google pidiendo permiso. Acepta.
+5. El navegador mostrará "✅ Calendar conectado". Vuelve a Telegram.
+6. Te llegará un mensaje del bot confirmando la conexión.
+
+Listo. Ya puedes pedirle al bot cosas como *"apunta dentista el viernes a las 10 y mételo en el calendario"*.
+
+### Notas
+
+- Los avisos (notificaciones) de los eventos en tu móvil dependen de tu app de Calendar, no del bot. En iPhone: Ajustes → Notificaciones → Calendario; o el aviso por defecto que tengas configurado en Google Calendar.
+- El bot también te manda recordatorios por Telegram: 1 día antes y 1 hora antes para eventos puntuales. Funciona aunque no uses Calendar.
+- Si en algún momento revocas el acceso al bot desde tu cuenta de Google ([myaccount.google.com/permissions](https://myaccount.google.com/permissions)), el bot te avisará la próxima vez que intente sincronizar algo y te pedirá reconectar.
+
+---
+
 ## Garantías de privacidad: por qué tus datos están aislados
 
 Esta es la pregunta clave si te pasaron el repo desde el bot de otra persona. Te lo explico claro:
@@ -336,5 +418,11 @@ La única forma de que algo se cruzara sería si te pasaras tu propio token de T
 
 **Error 409 Conflict en los logs**:
 - Tienes otro proceso polleando el mismo bot. ¿Tienes el repo corriendo también en local? Para el local con `Ctrl+C` o cierra el terminal.
+
+**Al conectar Calendar, Google muestra "Acceso bloqueado: no has completado el proceso de verificación"**:
+- Te has saltado el paso C3, punto 6: tu email no está en la lista de "Test users" de la pantalla de consentimiento OAuth. Vuelve a [console.cloud.google.com](https://console.cloud.google.com) → tu proyecto → Google Auth Platform → Público (o Test users) → Add users → añade tu Gmail. Después intenta otra vez "conecta con calendar" en Telegram (te dará un enlace nuevo).
+
+**Al conectar Calendar, el bot dice "Algo ha fallado, vuelve a Telegram"**:
+- Mira `flyctl logs --app TU-NOMBRE-AQUI`. Lo más probable es que el `redirect_uri` del cliente OAuth en Google Cloud no coincida con `https://TU-NOMBRE-AQUI.fly.dev/oauth/callback`. Vuelve al paso C4 punto 5 y revisa que el dominio sea exactamente el de tu app.
 
 Para cualquier otra cosa, lee los logs con atención (`flyctl logs --app TU-NOMBRE-AQUI --no-tail | tail -50`) y pasa el output a quien te haya compartido esto. Casi todo lo que pasa está ahí escrito.
