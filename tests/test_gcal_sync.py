@@ -46,3 +46,60 @@ def test_clear_tokens():
     gcal_sync.save_tokens("at-1", "rt-1", "2026-05-29T12:00:00")
     gcal_sync.clear_tokens()
     assert gcal_sync.get_tokens() is None
+
+
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
+
+
+def test_oauth_start_url_contains_required_params(monkeypatch):
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_ID", "abc.apps.googleusercontent.com")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_REDIRECT_URI", "https://example.com/cb")
+    url = gcal_sync.oauth_start_url()
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+    assert parsed.netloc == "accounts.google.com"
+    assert qs["client_id"] == ["abc.apps.googleusercontent.com"]
+    assert qs["redirect_uri"] == ["https://example.com/cb"]
+    assert qs["response_type"] == ["code"]
+    assert "https://www.googleapis.com/auth/calendar.events" in qs["scope"][0]
+    assert qs["access_type"] == ["offline"]
+    assert qs["prompt"] == ["consent"]
+
+
+def test_exchange_code_persists_tokens(monkeypatch):
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_REDIRECT_URI", "https://example.com/cb")
+
+    fake_response = {
+        "access_token": "at-abc",
+        "refresh_token": "rt-abc",
+        "expires_in": 3599,
+    }
+
+    captured = {}
+    def fake_post(url, data, timeout):
+        captured["url"] = url
+        captured["data"] = data
+        class R:
+            status_code = 200
+            def json(self_inner):
+                return fake_response
+            def raise_for_status(self_inner):
+                pass
+        return R()
+
+    with patch("gcal_sync.requests.post", side_effect=fake_post):
+        gcal_sync.exchange_code("the-code")
+
+    assert captured["url"] == "https://oauth2.googleapis.com/token"
+    assert captured["data"]["code"] == "the-code"
+    assert captured["data"]["client_id"] == "cid"
+    assert captured["data"]["client_secret"] == "csecret"
+    assert captured["data"]["redirect_uri"] == "https://example.com/cb"
+    assert captured["data"]["grant_type"] == "authorization_code"
+
+    saved = gcal_sync.get_tokens()
+    assert saved["access_token"] == "at-abc"
+    assert saved["refresh_token"] == "rt-abc"

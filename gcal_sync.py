@@ -4,14 +4,27 @@ Storage de tokens OAuth + llamadas a la API + endpoint /oauth/callback.
 El bot es la fuente de verdad: si Google falla, se loguea y se sigue.
 """
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlencode
+
+import requests
 
 import db
-from date_utils import now_iso
+from config import (
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
+)
+from date_utils import now_iso, now_madrid_naive
 
 log = logging.getLogger("gcal_sync")
 
 _PROVIDER = "google"
+_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_API_BASE = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 
 
 def get_tokens() -> Optional[dict]:
@@ -49,3 +62,44 @@ def clear_tokens() -> None:
     """Borra los tokens guardados (uso: token revocado en Google)."""
     with db.connect() as conn:
         conn.execute("DELETE FROM oauth_tokens WHERE provider = ?", (_PROVIDER,))
+
+
+def oauth_start_url() -> str:
+    """Devuelve la URL a la que el usuario debe ir para autorizar el bot."""
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": _SCOPE,
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    return f"{_AUTH_URL}?{urlencode(params)}"
+
+
+def exchange_code(code: str) -> None:
+    """Intercambia el authorization code por tokens y los guarda.
+
+    Lanza excepción si Google devuelve error (la captura quien llame).
+    """
+    response = requests.post(
+        _TOKEN_URL,
+        data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    expires_at = (
+        now_madrid_naive() + timedelta(seconds=int(payload["expires_in"]))
+    ).isoformat(timespec="seconds")
+    save_tokens(
+        access_token=payload["access_token"],
+        refresh_token=payload["refresh_token"],
+        expires_at=expires_at,
+    )
