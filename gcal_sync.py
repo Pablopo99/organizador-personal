@@ -140,3 +140,65 @@ def ensure_valid_token() -> str:
         expires_at=new_expires,
     )
     return payload["access_token"]
+
+
+def _build_event_body(fields: dict) -> dict:
+    """Traduce campos del bot al JSON body de Google Calendar.
+
+    Solo incluye las claves que vienen en `fields` para que sirva tanto para
+    POST (create) como para PATCH (update).
+    """
+    body: dict = {}
+    if "title" in fields:
+        body["summary"] = fields["title"]
+    if "notes" in fields and fields["notes"]:
+        body["description"] = fields["notes"]
+    if "datetime" in fields:
+        start = datetime.fromisoformat(fields["datetime"])
+        end = start + timedelta(hours=1)
+        body["start"] = {"dateTime": start.isoformat(timespec="seconds"), "timeZone": "Europe/Madrid"}
+        body["end"] = {"dateTime": end.isoformat(timespec="seconds"), "timeZone": "Europe/Madrid"}
+    return body
+
+
+def push_event(event: dict) -> str:
+    """Crea un evento en Calendar. Devuelve el id de Google."""
+    access_token = ensure_valid_token()
+    body = _build_event_body(event)
+    response = requests.post(
+        _API_BASE,
+        json=body,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def update_event(gcal_event_id: str, fields: dict) -> None:
+    """PATCH a Calendar con los campos cambiados."""
+    access_token = ensure_valid_token()
+    body = _build_event_body(fields)
+    if not body:
+        return
+    response = requests.patch(
+        f"{_API_BASE}/{gcal_event_id}",
+        json=body,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15,
+    )
+    response.raise_for_status()
+
+
+def delete_event(gcal_event_id: str) -> None:
+    """DELETE en Calendar. 404 se trata como éxito (ya no existe)."""
+    access_token = ensure_valid_token()
+    response = requests.delete(
+        f"{_API_BASE}/{gcal_event_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15,
+    )
+    if response.status_code == 404:
+        log.warning("Evento %s ya no existe en Calendar, asumimos éxito", gcal_event_id)
+        return
+    response.raise_for_status()

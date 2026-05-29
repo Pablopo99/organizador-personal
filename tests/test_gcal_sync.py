@@ -151,3 +151,101 @@ def test_ensure_valid_token_refreshes_when_near_expiry(monkeypatch):
 def test_ensure_valid_token_raises_when_no_tokens():
     with pytest.raises(gcal_sync.NotConnected):
         gcal_sync.ensure_valid_token()
+
+
+def _fresh_token(monkeypatch):
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_SECRET", "csecret")
+    future = (gcal_sync.now_madrid_naive() + timedelta(hours=1)).isoformat(timespec="seconds")
+    gcal_sync.save_tokens("at-fresh", "rt-fresh", future)
+
+
+def test_push_event_posts_correct_body(monkeypatch):
+    _fresh_token(monkeypatch)
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        class R:
+            status_code = 200
+            def json(self_inner):
+                return {"id": "gcal-evt-1"}
+            def raise_for_status(self_inner):
+                pass
+        return R()
+
+    with patch("gcal_sync.requests.post", side_effect=fake_post):
+        gcal_event_id = gcal_sync.push_event({
+            "title": "Dentista",
+            "datetime": "2026-05-29T10:00:00",
+            "notes": "C/ Doctor San Juan 26",
+            "category": "medical",
+        })
+
+    assert gcal_event_id == "gcal-evt-1"
+    assert captured["url"] == "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+    assert captured["headers"]["Authorization"] == "Bearer at-fresh"
+    body = captured["json"]
+    assert body["summary"] == "Dentista"
+    assert body["description"] == "C/ Doctor San Juan 26"
+    assert body["start"] == {"dateTime": "2026-05-29T10:00:00", "timeZone": "Europe/Madrid"}
+    assert body["end"] == {"dateTime": "2026-05-29T11:00:00", "timeZone": "Europe/Madrid"}
+
+
+def test_push_event_handles_missing_notes(monkeypatch):
+    _fresh_token(monkeypatch)
+    def fake_post(url, json=None, headers=None, timeout=None):
+        class R:
+            def json(self_inner):
+                return {"id": "x"}
+            def raise_for_status(self_inner):
+                pass
+        return R()
+    with patch("gcal_sync.requests.post", side_effect=fake_post) as p:
+        gcal_sync.push_event({
+            "title": "T", "datetime": "2026-05-29T10:00:00", "category": "other",
+        })
+    body = p.call_args.kwargs["json"]
+    assert "description" not in body or body["description"] == ""
+
+
+def test_update_event_patches_changed_fields(monkeypatch):
+    _fresh_token(monkeypatch)
+    captured = {}
+    def fake_patch(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        class R:
+            def raise_for_status(self_inner):
+                pass
+        return R()
+    with patch("gcal_sync.requests.patch", side_effect=fake_patch):
+        gcal_sync.update_event("gcal-evt-1", {"title": "Nuevo", "datetime": "2026-05-29T15:30:00"})
+    assert captured["url"].endswith("/primary/events/gcal-evt-1")
+    assert captured["json"]["summary"] == "Nuevo"
+    assert captured["json"]["start"]["dateTime"] == "2026-05-29T15:30:00"
+    assert captured["json"]["end"]["dateTime"] == "2026-05-29T16:30:00"
+
+
+def test_delete_event_treats_404_as_success(monkeypatch):
+    _fresh_token(monkeypatch)
+    class R:
+        status_code = 404
+        def raise_for_status(self_inner):
+            import requests as r
+            raise r.HTTPError(response=self_inner)
+    with patch("gcal_sync.requests.delete", return_value=R()):
+        gcal_sync.delete_event("gcal-evt-gone")  # no debe levantar
+
+
+def test_delete_event_success_204(monkeypatch):
+    _fresh_token(monkeypatch)
+    class R:
+        status_code = 204
+        def raise_for_status(self_inner):
+            pass
+    with patch("gcal_sync.requests.delete", return_value=R()):
+        gcal_sync.delete_event("gcal-evt-1")
