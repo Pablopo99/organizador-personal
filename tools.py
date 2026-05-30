@@ -551,14 +551,14 @@ def unmark_objective_done(objective_id: int) -> dict:
 
 # ----------------------------------------------------------------- tasks ----
 
-def add_task(text: str) -> dict:
+def add_task(text: str, due_date: Optional[str] = None) -> dict:
     with db.connect() as conn:
         cur = conn.execute(
-            "INSERT INTO tasks (text, done, created_at) VALUES (?, 0, ?)",
-            (text, now_iso()),
+            "INSERT INTO tasks (text, done, created_at, due_date) VALUES (?, 0, ?, ?)",
+            (text, now_iso(), due_date),
         )
         new_id = cur.lastrowid
-    return {"id": new_id, "text": text}
+    return {"id": new_id, "text": text, "due_date": due_date}
 
 
 def list_tasks(include_done: bool = False) -> list[dict]:
@@ -738,10 +738,19 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "add_task",
-        "description": "Añade una tarea suelta sin fecha.",
+        "description": (
+            "Añade una tarea. due_date es opcional ('YYYY-MM-DD'); úsala SOLO si "
+            "el usuario indica un día concreto. Si no la indica, no inventes fecha."
+        ),
         "input_schema": {
             "type": "object",
-            "properties": {"text": {"type": "string"}},
+            "properties": {
+                "text": {"type": "string"},
+                "due_date": {
+                    "type": ["string", "null"],
+                    "description": "Fecha objetivo en formato YYYY-MM-DD. NULL si no la hay.",
+                },
+            },
             "required": ["text"],
         },
     },

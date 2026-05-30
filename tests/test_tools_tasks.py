@@ -84,3 +84,21 @@ def test_uncomplete_task_idempotent_when_pending():
             "SELECT done FROM tasks WHERE id = ?", (t["id"],)
         ).fetchone()
     assert row[0] == 0
+
+
+def test_add_task_with_due_date_persists_it():
+    res = tools.add_task("Comprar pan", due_date="2026-06-05")
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT due_date FROM tasks WHERE id = ?", (res["id"],)
+        ).fetchone()
+    assert row["due_date"] == "2026-06-05"
+
+
+def test_add_task_without_due_date_leaves_null():
+    res = tools.add_task("Tarea flotante")
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT due_date FROM tasks WHERE id = ?", (res["id"],)
+        ).fetchone()
+    assert row["due_date"] is None
