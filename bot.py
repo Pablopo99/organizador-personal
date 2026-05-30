@@ -290,6 +290,21 @@ _CALLBACK_ACTIONS = {
     "uO": lambda i: tools.unmark_objective_done(i),
     "tg": lambda i: None,  # toggle de visibilidad: no muta, solo re-renderiza
     "gc": lambda i: tools.push_event_to_calendar(i),
+    "rE": lambda i: tools.recreate_event(i),
+    "rT": lambda i: tools.recreate_task(i),
+    "rO": lambda i: tools.recreate_objective(i),
+    "dE": lambda i: tools.discard_event(i),
+    "dT": lambda i: tools.discard_task(i),
+    "dO": lambda i: tools.discard_objective(i),
+}
+
+_PROACTIVE_CONFIRM_TEXTS = {
+    "rE": "✅ Pasado a hoy.",
+    "rT": "✅ Pasada a hoy.",
+    "rO": "✅ Pasado a esta semana.",
+    "dE": "🗑️ Descartado.",
+    "dT": "🗑️ Descartada.",
+    "dO": "🗑️ Descartado.",
 }
 
 
@@ -343,6 +358,37 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except BadRequest:
             log.warning("No pude editar el mensaje del botón Calendar")
         await query.answer("Enviado a Calendar")
+        return
+
+    if action_type in _PROACTIVE_CONFIRM_TEXTS:
+        try:
+            original = query.message.text_html if query.message else ""
+        except AttributeError:
+            original = ""
+        confirm = _PROACTIVE_CONFIRM_TEXTS[action_type]
+        item_type_map = {"r": "recreate", "d": "discard"}
+        item_kind_map = {"E": "event", "T": "task", "O": "objective"}
+        action = item_type_map[action_type[0]]
+        item_kind = item_kind_map[action_type[1]]
+        try:
+            with db.connect() as conn:
+                conn.execute(
+                    "UPDATE missed_notifications "
+                    "SET decision = ?, decided_at = ? "
+                    "WHERE item_type = ? AND item_id = ?",
+                    (action, date_utils.now_iso(), item_kind, item_id),
+                )
+        except Exception:
+            log.exception("No pude actualizar missed_notifications para %s", data)
+        try:
+            await query.edit_message_text(
+                f"{original}\n\n{confirm}",
+                parse_mode=ParseMode.HTML,
+                reply_markup=None,
+            )
+        except BadRequest:
+            log.warning("No pude editar mensaje proactivo %s", data)
+        await query.answer(confirm)
         return
 
     today = date_utils.today_madrid()

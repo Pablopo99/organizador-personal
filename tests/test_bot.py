@@ -484,3 +484,63 @@ async def test_on_metricas_unauthorized_user_ignored(temp_db_for_bot, monkeypatc
     await bot._on_metricas(update, MagicMock())
 
     reply_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_callback_rT_recreates_task(monkeypatch, temp_db_for_bot):
+    import db
+    import tools
+    import date_utils
+    from datetime import date
+
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+
+    orig = tools.add_task("Llamar dentista", due_date="2026-05-20")
+
+    query = MagicMock()
+    query.from_user.id = 42
+    query.data = f"rT:{orig['id']}"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock()
+    query.message.text_html = "Tarea perdida: Llamar dentista"
+    update = MagicMock()
+    update.callback_query = query
+
+    await bot._on_callback_query(update, MagicMock())
+
+    with db.connect() as conn:
+        rows = conn.execute("SELECT outcome FROM tasks ORDER BY id").fetchall()
+    assert rows[0]["outcome"] == "missed"
+    assert rows[1]["outcome"] is None
+    query.edit_message_text.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_callback_dT_discards_task(monkeypatch, temp_db_for_bot):
+    import db
+    import tools
+
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    orig = tools.add_task("X", due_date="2026-05-20")
+
+    query = MagicMock()
+    query.from_user.id = 42
+    query.data = f"dT:{orig['id']}"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock()
+    query.message.text_html = "Tarea perdida: X"
+    update = MagicMock()
+    update.callback_query = query
+
+    await bot._on_callback_query(update, MagicMock())
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT outcome FROM tasks WHERE id = ?", (orig["id"],)
+        ).fetchone()
+    assert row["outcome"] == "missed"
+    query.edit_message_text.assert_called_once()
