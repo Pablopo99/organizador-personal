@@ -262,3 +262,78 @@ def test_oauth_tokens_provider_is_primary_key(tmp_path, monkeypatch):
                 "INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at, created_at)"
                 " VALUES ('google', 'b', 'r2', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
             )
+
+
+@pytest.fixture
+def fresh_db(monkeypatch):
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    monkeypatch.setattr(db, "DB_PATH", path)
+    db.init_schema()
+    yield path
+    os.unlink(path)
+
+
+def test_events_has_outcome_column(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    assert "outcome" in cols
+
+
+def test_tasks_has_due_date_and_outcome_columns(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    assert "due_date" in cols
+    assert "outcome" in cols
+
+
+def test_objectives_has_outcome_column(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(objectives)").fetchall()]
+    assert "outcome" in cols
+
+
+def test_routine_completions_has_status_column(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(routine_completions)"
+        ).fetchall()]
+    assert "status" in cols
+
+
+def test_missed_notifications_table_exists(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(missed_notifications)"
+        ).fetchall()]
+    assert "item_type" in cols
+    assert "item_id" in cols
+    assert "occurrence_date" in cols
+    assert "notified_at" in cols
+    assert "decision" in cols
+
+
+def test_missed_notifications_unique_routine_per_occurrence(fresh_db):
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO missed_notifications (item_type, item_id, occurrence_date, notified_at) "
+            "VALUES ('routine', 1, '2026-05-28', '2026-05-29T00:05:00')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO missed_notifications (item_type, item_id, occurrence_date, notified_at) "
+                "VALUES ('routine', 1, '2026-05-28', '2026-05-29T00:05:00')"
+            )
+
+
+def test_missed_notifications_unique_task_one_per_item(fresh_db):
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO missed_notifications (item_type, item_id, notified_at) "
+            "VALUES ('task', 5, '2026-05-29T00:05:00')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO missed_notifications (item_type, item_id, notified_at) "
+                "VALUES ('task', 5, '2026-05-30T00:05:00')"
+            )
