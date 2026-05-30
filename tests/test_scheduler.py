@@ -8,6 +8,8 @@ import pytest
 
 import db
 import scheduler
+import date_utils as _date_utils
+from datetime import date as _date
 
 
 @pytest.fixture(autouse=True)
@@ -194,6 +196,40 @@ async def test_check_reminders_event_outside_window(monkeypatch):
     await scheduler.check_reminders(_fake_context(send_mock))
 
     send_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_morning_summary_lunes_incluye_bloque_semanal(monkeypatch):
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    # 2026-05-25 es lunes
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 5, 25))
+
+    import tools
+    # Crear datos de la semana pasada: una tarea hecha on_time el martes 20-may.
+    t = tools.add_task("X", due_date="2026-05-20")
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 5, 20))
+    tools.complete_task(t["id"])
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 5, 25))
+
+    send_mock = AsyncMock()
+    await scheduler.morning_summary(_fake_context(send_mock))
+
+    send_mock.assert_called_once()
+    text = send_mock.call_args.kwargs["text"]
+    assert "Tu semana pasada" in text
+
+
+@pytest.mark.asyncio
+async def test_morning_summary_martes_no_incluye_bloque_semanal(monkeypatch):
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 5, 26))
+
+    send_mock = AsyncMock()
+    await scheduler.morning_summary(_fake_context(send_mock))
+
+    send_mock.assert_called_once()
+    text = send_mock.call_args.kwargs["text"]
+    assert "Tu semana pasada" not in text
 
 
 def test_ptb_days_convention_zero_is_sunday():

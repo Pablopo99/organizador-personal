@@ -22,14 +22,29 @@ _ES_MONTHS = [
 
 
 async def morning_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Envía el saludo matutino con la vista de hoy."""
+    """Envía el saludo matutino con la vista de hoy. Los lunes incluye bloque semanal."""
     import date_utils
+    import tools as _tools
     import views
+    from datetime import timedelta as _td
 
     today = date_utils.today_madrid()
     weekday = _WEEKDAYS_ES[today.weekday()]
     date_str = f"{today.day} {_ES_MONTHS[today.month - 1]}"
     greeting = f"Buenos días Pablo 🌅 — <b>{weekday}, {date_str}</b>\n\n"
+
+    weekly_block = ""
+    if today.weekday() == 0:
+        last_monday = today - _td(days=7)
+        last_sunday = today - _td(days=1)
+        try:
+            m = _tools.metrics_summary(
+                last_monday.isoformat(), last_sunday.isoformat()
+            )
+            weekly_block = _format_weekly_block(m)
+        except Exception:
+            log.exception("Error generando bloque semanal del lunes")
+            weekly_block = ""
 
     try:
         with db.connect() as conn:
@@ -38,15 +53,53 @@ async def morning_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
         log.exception("Error generando el saludo matutino")
         return
 
+    text = greeting + weekly_block + body
+
     try:
         await context.bot.send_message(
             chat_id=ALLOWED_USER_ID,
-            text=greeting + body,
+            text=text,
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard,
         )
     except Exception:
         log.exception("Error enviando el saludo matutino")
+
+
+def _format_weekly_block(m: dict) -> str:
+    """Render del bloque semanal de lunes. Vacío si no hay datos."""
+    routine_totals = m["routines"]["totals"]
+    routine_total = sum(routine_totals.values())
+    tasks_total = sum(m["tasks"].values())
+    obj_total = sum(m["objectives"].values())
+
+    if routine_total == 0 and tasks_total == 0 and obj_total == 0:
+        return ""
+
+    def _pct_line(label: str, d: dict) -> str:
+        total = d["on_time"] + d["grace"] + d["missed"]
+        if total == 0:
+            return ""
+        ot = round(100 * d["on_time"] / total)
+        gr = round(100 * d["grace"] / total)
+        ms = round(100 * d["missed"] / total)
+        return f"   {label}:   🟢 {ot}% 🟡 {gr}% 🔴 {ms}%"
+
+    lines = ["📊 <b>Tu semana pasada</b>"]
+    if routine_total > 0:
+        line = _pct_line("Rutinas", routine_totals)
+        if line:
+            lines.append(line)
+    if tasks_total > 0:
+        line = _pct_line("Tareas", m["tasks"])
+        if line:
+            lines.append(line)
+    if obj_total > 0:
+        done = m["objectives"]["on_time"] + m["objectives"]["grace"]
+        total = obj_total
+        lines.append(f"   Objetivos: {done} de {total} cumplidos")
+
+    return "\n".join(lines) + "\n\n"
 
 
 async def weekly_objectives_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
