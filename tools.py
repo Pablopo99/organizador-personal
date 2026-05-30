@@ -373,6 +373,93 @@ def uncomplete_routine_today(event_id: int) -> dict:
     return {"event_id": event_id, "completion_date": today, "deleted": cur.rowcount}
 
 
+def recreate_event(event_id: int) -> dict:
+    """Crea evento nuevo con la misma hora pero fecha de hoy.
+    Marca el original como outcome='missed'. NO copia gcal_event_id."""
+    import date_utils
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        orig = conn.execute(
+            "SELECT title, datetime, category, recurring_rule, notes "
+            "FROM events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        if orig is None:
+            return {"error": "not_found"}
+
+        time_part = orig["datetime"][11:] if "T" in orig["datetime"] else "09:00:00"
+        new_dt = f"{today.isoformat()}T{time_part}"
+
+        cur = conn.execute(
+            """
+            INSERT INTO events (title, datetime, category, recurring_rule, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (orig["title"], new_dt, orig["category"], orig["recurring_rule"],
+             orig["notes"], date_utils.now_iso()),
+        )
+        new_id = cur.lastrowid
+
+        conn.execute(
+            "UPDATE events SET outcome = 'missed' WHERE id = ?", (event_id,)
+        )
+
+    return {"old_id": event_id, "new_id": new_id, "new_datetime": new_dt}
+
+
+def recreate_task(task_id: int) -> dict:
+    """Crea tarea nueva con due_date=hoy. Marca la original como missed."""
+    import date_utils
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        orig = conn.execute(
+            "SELECT text FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if orig is None:
+            return {"error": "not_found"}
+
+        cur = conn.execute(
+            "INSERT INTO tasks (text, done, created_at, due_date) VALUES (?, 0, ?, ?)",
+            (orig["text"], date_utils.now_iso(), today.isoformat()),
+        )
+        new_id = cur.lastrowid
+
+        conn.execute(
+            "UPDATE tasks SET outcome = 'missed' WHERE id = ?", (task_id,)
+        )
+
+    return {"old_id": task_id, "new_id": new_id, "due_date": today.isoformat()}
+
+
+def recreate_objective(objective_id: int) -> dict:
+    """Crea objetivo nuevo en la semana actual. Marca el original como missed."""
+    from date_utils import monday_of_week
+    import date_utils
+
+    today = date_utils.today_madrid()
+    week_start = monday_of_week(today).isoformat()
+    with db.connect() as conn:
+        orig = conn.execute(
+            "SELECT text FROM objectives WHERE id = ?", (objective_id,)
+        ).fetchone()
+        if orig is None:
+            return {"error": "not_found"}
+
+        cur = conn.execute(
+            "INSERT INTO objectives (text, week_start, done, created_at) VALUES (?, ?, 0, ?)",
+            (orig["text"], week_start, date_utils.now_iso()),
+        )
+        new_id = cur.lastrowid
+
+        conn.execute(
+            "UPDATE objectives SET outcome = 'missed' WHERE id = ?", (objective_id,)
+        )
+
+    return {"old_id": objective_id, "new_id": new_id, "week_start": week_start}
+
+
 def _completion_dates(event_id: int, conn) -> list:
     """Devuelve las fechas de completion como objetos date, ordenadas asc."""
     rows = conn.execute(
