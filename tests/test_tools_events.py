@@ -926,3 +926,29 @@ def test_mark_weekly_routine_done_in_wrong_day_rejected(monkeypatch):
             (res["id"],),
         ).fetchall()
     assert len(rows) == 0
+
+
+def test_routine_summary_breaks_down_on_time_and_grace(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event(
+        "Meditar", "2026-05-25T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    # Insertamos manualmente 2 on_time + 1 grace en el rango.
+    with db.connect() as conn:
+        for d, status in [
+            ("2026-05-25", "on_time"),
+            ("2026-05-26", "grace"),
+            ("2026-05-27", "on_time"),
+        ]:
+            conn.execute(
+                "INSERT INTO routine_completions (event_id, completion_date, created_at, status) "
+                "VALUES (?, ?, ?, ?)",
+                (res["id"], d, "2026-05-30T08:00:00", status),
+            )
+
+    summary = tools.routine_summary("2026-05-25", "2026-05-30")
+    target = next(r for r in summary if r["event_id"] == res["id"])
+    assert target["on_time_count"] == 2
+    assert target["grace_count"] == 1
+    assert target["completed_days"] == 3
+    assert target["scheduled_days"] == 6

@@ -490,15 +490,22 @@ def routine_summary(date_from: str, date_to: str) -> list[dict]:
             scheduled = _count_scheduled_days(rule, row["datetime"], start, end)
             if scheduled == 0:
                 continue
-            completed = conn.execute(
+            counts = conn.execute(
                 """
-                SELECT COUNT(*) FROM routine_completions
+                SELECT
+                    SUM(CASE WHEN status = 'on_time' THEN 1 ELSE 0 END) as on_time_count,
+                    SUM(CASE WHEN status = 'grace'   THEN 1 ELSE 0 END) as grace_count,
+                    COUNT(*) as completed_days
+                FROM routine_completions
                 WHERE event_id = ?
                   AND completion_date >= ?
                   AND completion_date <= ?
                 """,
                 (row["id"], date_from, date_to),
-            ).fetchone()[0]
+            ).fetchone()
+            on_time_count = counts["on_time_count"] or 0
+            grace_count = counts["grace_count"] or 0
+            completed = counts["completed_days"] or 0
             current = _current_streak(row["id"], rule, today, conn)
             best = _best_streak(row["id"], rule, conn)
             results.append({
@@ -508,6 +515,8 @@ def routine_summary(date_from: str, date_to: str) -> list[dict]:
                 "recurring_rule": rule,
                 "scheduled_days": scheduled,
                 "completed_days": completed,
+                "on_time_count": on_time_count,
+                "grace_count": grace_count,
                 "current_streak": current,
                 "best_streak": best,
             })
