@@ -488,6 +488,11 @@ async def _async_main() -> None:
         days=(0,),
         name="weekly_objectives_reminder",
     )
+    app.job_queue.run_daily(
+        scheduler.detect_missed_items,
+        time=dtime(hour=0, minute=5, tzinfo=madrid),
+        name="detect_missed_items",
+    )
 
     await app.initialize()
     await app.start()
