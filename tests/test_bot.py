@@ -544,3 +544,10 @@ async def test_callback_dT_discards_task(monkeypatch, temp_db_for_bot):
         ).fetchone()
     assert row["outcome"] == "missed"
     query.edit_message_text.assert_called_once()
+
+
+def test_rachas_prompt_mentions_30_day_stats():
+    prompt = bot._SLASH_PROMPTS["/rachas"]
+    assert "30" in prompt
+    assert "on_time" in prompt or "🟢" in prompt
+    assert "routine_summary" in prompt
