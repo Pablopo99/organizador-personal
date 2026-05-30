@@ -575,12 +575,30 @@ def list_tasks(include_done: bool = False) -> list[dict]:
 
 
 def complete_task(task_id: int) -> dict:
+    import date_utils
+
+    today = date_utils.today_madrid()
     with db.connect() as conn:
+        row = conn.execute(
+            "SELECT due_date FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return {"id": task_id, "updated": 0, "error": "not_found"}
+
+        assigned = None
+        if row["due_date"]:
+            assigned = date.fromisoformat(row["due_date"])
+            outcome = _calculate_outcome(assigned, today)
+            if outcome is None:
+                return {"id": task_id, "updated": 0, "error": "out_of_window"}
+        else:
+            outcome = None
+
         cur = conn.execute(
-            "UPDATE tasks SET done = 1, done_at = ? WHERE id = ?",
-            (now_iso(), task_id),
+            "UPDATE tasks SET done = 1, done_at = ?, outcome = ? WHERE id = ?",
+            (now_iso(), outcome, task_id),
         )
-    return {"id": task_id, "updated": cur.rowcount}
+    return {"id": task_id, "updated": cur.rowcount, "outcome": outcome}
 
 
 def uncomplete_task(task_id: int) -> dict:

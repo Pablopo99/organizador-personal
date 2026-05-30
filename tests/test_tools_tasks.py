@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import date
 
 import pytest
 
@@ -102,3 +103,55 @@ def test_add_task_without_due_date_leaves_null():
             "SELECT due_date FROM tasks WHERE id = ?", (res["id"],)
         ).fetchone()
     assert row["due_date"] is None
+
+
+def test_complete_task_on_time_sets_outcome_on_time(monkeypatch):
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("X", due_date="2026-05-30")
+    tools.complete_task(t["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT outcome FROM tasks WHERE id = ?", (t["id"],)
+        ).fetchone()
+    assert row["outcome"] == "on_time"
+
+
+def test_complete_task_grace_when_one_day_late(monkeypatch):
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 31))
+    t = tools.add_task("Y", due_date="2026-05-30")
+    tools.complete_task(t["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT outcome FROM tasks WHERE id = ?", (t["id"],)
+        ).fetchone()
+    assert row["outcome"] == "grace"
+
+
+def test_complete_task_rejected_when_two_days_late(monkeypatch):
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 6, 1))
+    t = tools.add_task("Z", due_date="2026-05-30")
+    res = tools.complete_task(t["id"])
+    assert res.get("error") == "out_of_window"
+    assert res.get("updated") == 0
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM tasks WHERE id = ?", (t["id"],)
+        ).fetchone()
+    assert row["done"] == 0
+    assert row["outcome"] is None
+
+
+def test_complete_task_floating_leaves_outcome_null(monkeypatch):
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("Flotante")
+    tools.complete_task(t["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM tasks WHERE id = ?", (t["id"],)
+        ).fetchone()
+    assert row["done"] == 1
+    assert row["outcome"] is None
