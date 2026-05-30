@@ -1,9 +1,11 @@
 import os
 import tempfile
+from datetime import date
 from unittest.mock import patch
 
 import pytest
 
+import date_utils
 import db
 import tools
 
@@ -217,8 +219,8 @@ def test_mark_event_done_on_recurring_twice_same_day_idempotent(monkeypatch):
     first = tools.mark_event_done(created["id"])
     second = tools.mark_event_done(created["id"])
 
-    assert first.get("already_done_today") is not True
-    assert second["already_done_today"] is True
+    assert first.get("already_done") is not True
+    assert second["already_done"] is True
 
     with db.connect() as conn:
         count = conn.execute(
@@ -841,3 +843,86 @@ def test_mark_event_done_rejected_out_of_window(monkeypatch):
         ).fetchone()
     assert row["done"] == 0
     assert row["outcome"] is None
+
+
+def test_mark_routine_done_today_on_time(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event(
+        "Meditar", "2026-05-01T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    tools.mark_event_done(res["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT completion_date, status FROM routine_completions "
+            "WHERE event_id = ?",
+            (res["id"],),
+        ).fetchone()
+    assert row["completion_date"] == "2026-05-30"
+    assert row["status"] == "on_time"
+
+
+def test_mark_daily_routine_done_one_day_late_uses_yesterday_with_grace(monkeypatch):
+    """WEEKLY:SAT: si hoy es domingo 31 y no se hizo el sábado 30, se registra el 30 con grace."""
+    # 2026-05-30 = sábado, 2026-05-31 = domingo.
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 31))
+    res = tools.add_event(
+        "Meditar", "2026-05-01T08:00:00", "personal", recurring_rule="WEEKLY:SAT"
+    )
+    tools.mark_event_done(res["id"])
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT completion_date, status FROM routine_completions "
+            "WHERE event_id = ? ORDER BY completion_date",
+            (res["id"],),
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["completion_date"] == "2026-05-30"
+    assert rows[0]["status"] == "grace"
+
+
+def test_mark_weekly_routine_done_in_grace_records_expected_day(monkeypatch):
+    """WEEKLY:MON: si hoy es martes y no se hizo el lunes, grabar el lunes."""
+    # 2026-05-25 lunes, 2026-05-26 martes.
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 26))
+    res = tools.add_event(
+        "Reunión semanal", "2026-05-04T09:00:00", "work",
+        recurring_rule="WEEKLY:MON",
+    )
+    tools.mark_event_done(res["id"])
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT completion_date, status FROM routine_completions "
+            "WHERE event_id = ?",
+            (res["id"],),
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["completion_date"] == "2026-05-25"
+    assert rows[0]["status"] == "grace"
+
+
+def test_mark_daily_routine_for_today_is_on_time(monkeypatch):
+    """DAILY: hoy SIEMPRE es fecha esperada, así que cualquier mark es on_time."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 6, 1))
+    res = tools.add_event(
+        "Meditar", "2026-05-01T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    out = tools.mark_event_done(res["id"])
+    assert out.get("status") == "on_time"
+
+
+def test_mark_weekly_routine_done_in_wrong_day_rejected(monkeypatch):
+    """WEEKLY:MON: si hoy es jueves (no lunes ni martes), rechazar."""
+    # 2026-05-28 jueves.
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    res = tools.add_event(
+        "Reunión semanal", "2026-05-04T09:00:00", "work",
+        recurring_rule="WEEKLY:MON",
+    )
+    out = tools.mark_event_done(res["id"])
+    assert out.get("error") == "out_of_window"
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM routine_completions WHERE event_id = ?",
+            (res["id"],),
+        ).fetchall()
+    assert len(rows) == 0

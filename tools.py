@@ -292,26 +292,46 @@ def mark_event_done(event_id: int) -> dict:
             return {"id": event_id, "updated": 0, "error": "not_found"}
 
         if row["recurring_rule"]:
-            today_iso = today.isoformat()
+            rule = row["recurring_rule"]
+            most_recent_expected = _most_recent_expected_date(rule, today)
+            previous_expected = _previous_expected_date(rule, today)
+
+            target_date: Optional[date] = None
+            status: Optional[str] = None
+
+            if most_recent_expected == today:
+                target_date = today
+                status = "on_time"
+            elif (
+                previous_expected is not None
+                and (today - previous_expected).days == 1
+            ):
+                # Día de gracia: la fecha esperada anterior fue ayer.
+                target_date = previous_expected
+                status = "grace"
+            else:
+                return {"id": event_id, "updated": 0, "error": "out_of_window"}
+
+            target_iso = target_date.isoformat()
             try:
                 conn.execute(
                     """
                     INSERT INTO routine_completions (event_id, completion_date, created_at, status)
-                    VALUES (?, ?, ?, 'on_time')
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (event_id, today_iso, date_utils.now_iso()),
+                    (event_id, target_iso, date_utils.now_iso(), status),
                 )
                 return {
                     "event_id": event_id,
-                    "completion_date": today_iso,
-                    "status": "on_time",
+                    "completion_date": target_iso,
+                    "status": status,
                     "updated": 1,
                 }
             except sqlite3.IntegrityError:
                 return {
                     "event_id": event_id,
-                    "completion_date": today_iso,
-                    "already_done_today": True,
+                    "completion_date": target_iso,
+                    "already_done": True,
                     "updated": 0,
                 }
 
