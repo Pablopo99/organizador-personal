@@ -765,7 +765,9 @@ def list_tasks(include_done: bool = False) -> list[dict]:
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE done = 0 ORDER BY id"
+                "SELECT * FROM tasks WHERE done = 0 "
+                "AND (outcome IS NULL OR outcome != 'missed') "
+                "ORDER BY id"
             ).fetchall()
     return [dict(r) for r in rows]
 

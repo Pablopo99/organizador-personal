@@ -200,17 +200,50 @@ def render_tomorrow_view(tomorrow: date, conn) -> tuple[str, Optional[InlineKeyb
 
 
 def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
-    """Vista de /pendientes: una tarea por línea, un botón por tarea."""
-    tasks_all = tools.list_tasks(include_done=False)
+    """Vista de /pendientes: tres secciones (gracia, con fecha, flotantes)."""
+    from datetime import timedelta
 
-    if not tasks_all:
+    import date_utils
+
+    today = date_utils.today_madrid()
+    yesterday = today - timedelta(days=1)
+    today_iso = today.isoformat()
+    yesterday_iso = yesterday.isoformat()
+
+    all_tasks = tools.list_tasks(include_done=False)
+    pending = [t for t in all_tasks if t.get("outcome") != "missed"]
+
+    grace = [t for t in pending if t.get("due_date") == yesterday_iso]
+    with_date = sorted(
+        [t for t in pending
+         if t.get("due_date") and t["due_date"] >= today_iso],
+        key=lambda t: t["due_date"],
+    )
+    floating = [t for t in pending if not t.get("due_date")]
+
+    if not (grace or with_date or floating):
         return "No tienes tareas pendientes. 🎉", None
 
-    lines = [f"• {t['text']}" for t in tasks_all]
-    text = "📝 <b>PENDIENTES</b>\n" + "\n".join(lines)
+    sections: list[str] = []
+    if grace:
+        lines = [f"• {t['text']}" for t in grace]
+        sections.append("🟡 <b>EN GRACIA</b>\n" + "\n".join(lines))
+    if with_date:
+        lines = []
+        weekdays_es = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+        for t in with_date:
+            d = date.fromisoformat(t["due_date"])
+            wd = weekdays_es[d.weekday()]
+            lines.append(f"• {wd} {d.day}/{d.month:02d} — {t['text']}")
+        sections.append("📅 <b>CON FECHA</b>\n" + "\n".join(lines))
+    if floating:
+        lines = [f"• {t['text']}" for t in floating]
+        sections.append("🌊 <b>FLOTANTES</b>\n" + "\n".join(lines))
+
+    text = "\n\n".join(sections)
 
     buttons: list[list[InlineKeyboardButton]] = []
-    for t in tasks_all:
+    for t in grace + with_date + floating:
         buttons.append([InlineKeyboardButton(
             f"🔲 {t['text']}", callback_data=f"mT:{t['id']}:P"
         )])

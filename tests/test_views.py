@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+import date_utils
 import db
 import tools
 import views
@@ -184,7 +185,8 @@ def test_render_pending_view_lists_tasks_with_buttons():
     with db.connect() as conn:
         text, keyboard = views.render_pending_view(conn)
 
-    assert "PENDIENTES" in text
+    # Tasks without due_date land in FLOTANTES section
+    assert "FLOTANTES" in text
     assert "Solucionar Spotify" in text
     assert "Comprar pan" in text
     assert keyboard is not None
@@ -513,3 +515,34 @@ def test_render_today_view_filters_tasks_by_due_date():
     assert "ayer" in text
     assert "manana" not in text
     assert "flotante" not in text
+
+
+def test_pending_view_three_sections(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    tools.add_task("a_grace", due_date="2026-05-18")
+    tools.add_task("b_con_fecha_futura", due_date="2026-05-25")
+    tools.add_task("c_flotante")
+
+    with db.connect() as conn:
+        text, _ = views.render_pending_view(conn)
+
+    assert "EN GRACIA" in text
+    assert "CON FECHA" in text
+    assert "FLOTANTES" in text
+    assert "a_grace" in text
+    assert "b_con_fecha_futura" in text
+    assert "c_flotante" in text
+
+
+def test_pending_view_excludes_missed_tasks(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    r = tools.add_task("descartada", due_date="2026-05-10")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET outcome = 'missed' WHERE id = ?", (r["id"],)
+        )
+
+    with db.connect() as conn:
+        text, keyboard = views.render_pending_view(conn)
+
+    assert "descartada" not in text
