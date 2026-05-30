@@ -92,15 +92,24 @@ def query_events(
     date_to: str,
     category: Optional[str] = None,
     include_done: bool = False,
+    include_grace: bool = False,
 ) -> list[dict]:
     dt_from = datetime.fromisoformat(date_from)
     dt_to = datetime.fromisoformat(date_to)
+
+    grace_from: Optional[datetime] = None
+    grace_to: Optional[datetime] = None
+    if include_grace:
+        grace_day = (dt_from.date() - timedelta(days=1))
+        grace_from = datetime.combine(grace_day, datetime.min.time())
+        grace_to = datetime.combine(grace_day, datetime.max.time().replace(microsecond=0))
 
     with db.connect() as conn:
         params: list = []
         sql = "SELECT * FROM events WHERE 1=1"
         if not include_done:
             sql += " AND COALESCE(done, 0) = 0"
+        sql += " AND (outcome IS NULL OR outcome != 'missed')"
         if category:
             sql += " AND category = ?"
             params.append(category)
@@ -112,6 +121,12 @@ def query_events(
             if not rule:
                 row_dt = datetime.fromisoformat(row["datetime"])
                 if dt_from <= row_dt <= dt_to:
+                    occurrences.append(row)
+                elif (
+                    include_grace
+                    and grace_from is not None
+                    and grace_from <= row_dt <= grace_to
+                ):
                     occurrences.append(row)
             else:
                 occurrences.extend(_expand_recurring(row, rule, dt_from, dt_to, conn))
@@ -915,6 +930,11 @@ TOOL_DEFINITIONS: list[dict] = [
                     "type": "boolean",
                     "default": False,
                     "description": "Si es true, incluye también eventos con done=1.",
+                },
+                "include_grace": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Si es true, también devuelve eventos puntuales del día anterior con done=0 (día de gracia).",
                 },
             },
             "required": ["date_from", "date_to"],

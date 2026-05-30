@@ -952,3 +952,39 @@ def test_routine_summary_breaks_down_on_time_and_grace(monkeypatch):
     assert target["grace_count"] == 1
     assert target["completed_days"] == 3
     assert target["scheduled_days"] == 6
+
+
+def test_query_events_include_grace_returns_yesterday_pending():
+    tools.add_event("Cita perdida", "2026-05-29T10:00:00", "personal")
+    rows = tools.query_events(
+        date_from="2026-05-30T00:00:00",
+        date_to="2026-05-30T23:59:59",
+        include_grace=True,
+    )
+    titles = [r["title"] for r in rows]
+    assert "Cita perdida" in titles
+
+
+def test_query_events_default_does_not_return_yesterday():
+    tools.add_event("Cita perdida", "2026-05-29T10:00:00", "personal")
+    rows = tools.query_events(
+        date_from="2026-05-30T00:00:00",
+        date_to="2026-05-30T23:59:59",
+    )
+    titles = [r["title"] for r in rows]
+    assert "Cita perdida" not in titles
+
+
+def test_query_events_include_grace_excludes_already_missed():
+    res = tools.add_event("Cita descartada", "2026-05-29T10:00:00", "personal")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE events SET outcome = 'missed' WHERE id = ?", (res["id"],)
+        )
+    rows = tools.query_events(
+        date_from="2026-05-30T00:00:00",
+        date_to="2026-05-30T23:59:59",
+        include_grace=True,
+    )
+    titles = [r["title"] for r in rows]
+    assert "Cita descartada" not in titles
