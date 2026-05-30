@@ -273,48 +273,63 @@ def connect_calendar() -> dict:
 def mark_event_done(event_id: int) -> dict:
     """Marca un evento como hecho.
 
-    Eventos puntuales -> done=1 (permanente).
-    Eventos recurrentes (rutinas) -> inserta fila en routine_completions
-    con la fecha de hoy en Madrid (no toca done).
+    Eventos puntuales -> done=1 + outcome (on_time | grace | rechazo).
+    Eventos recurrentes (rutinas) -> inserta routine_completions con
+    fecha de hoy + status='on_time'. La lógica de gracia para rutinas
+    se completa en una task posterior.
     """
     import sqlite3
 
     import date_utils
 
+    today = date_utils.today_madrid()
+
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT recurring_rule FROM events WHERE id = ?", (event_id,)
+            "SELECT recurring_rule, datetime FROM events WHERE id = ?", (event_id,)
         ).fetchone()
         if row is None:
-            return {"id": event_id, "updated": 0}
+            return {"id": event_id, "updated": 0, "error": "not_found"}
 
         if row["recurring_rule"]:
-            today = date_utils.today_madrid().isoformat()
+            today_iso = today.isoformat()
             try:
                 conn.execute(
                     """
-                    INSERT INTO routine_completions (event_id, completion_date, created_at)
-                    VALUES (?, ?, ?)
+                    INSERT INTO routine_completions (event_id, completion_date, created_at, status)
+                    VALUES (?, ?, ?, 'on_time')
                     """,
-                    (event_id, today, date_utils.now_iso()),
+                    (event_id, today_iso, date_utils.now_iso()),
                 )
                 return {
                     "event_id": event_id,
-                    "completion_date": today,
+                    "completion_date": today_iso,
+                    "status": "on_time",
                     "updated": 1,
                 }
             except sqlite3.IntegrityError:
                 return {
                     "event_id": event_id,
-                    "completion_date": today,
+                    "completion_date": today_iso,
                     "already_done_today": True,
                     "updated": 0,
                 }
 
+        # Evento puntual
+        try:
+            assigned = date.fromisoformat(row["datetime"][:10])
+        except ValueError:
+            return {"id": event_id, "updated": 0, "error": "bad_datetime"}
+
+        outcome = _calculate_outcome(assigned, today)
+        if outcome is None:
+            return {"id": event_id, "updated": 0, "error": "out_of_window"}
+
         cur = conn.execute(
-            "UPDATE events SET done = 1 WHERE id = ?", (event_id,)
+            "UPDATE events SET done = 1, outcome = ? WHERE id = ?",
+            (outcome, event_id),
         )
-        return {"id": event_id, "updated": cur.rowcount}
+        return {"id": event_id, "updated": cur.rowcount, "outcome": outcome}
 
 
 def unmark_event_done(event_id: int) -> dict:

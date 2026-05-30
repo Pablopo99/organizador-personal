@@ -81,13 +81,19 @@ def test_add_event_rejects_invalid_category():
         tools.add_event("X", "2026-05-15T10:00:00", "invalid_cat")
 
 
-def test_mark_event_done_updates_flag():
+def test_mark_event_done_updates_flag(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 15))
     created = tools.add_event("Dentista", "2026-05-15T10:00:00", "medical")
     res = tools.mark_event_done(created["id"])
     assert res["updated"] == 1
 
 
-def test_query_events_hides_done_by_default():
+def test_query_events_hides_done_by_default(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 15))
     a = tools.add_event("Pasado", "2026-05-15T10:00:00", "medical")
     tools.add_event("Vigente", "2026-05-15T11:00:00", "work")
     tools.mark_event_done(a["id"])
@@ -97,7 +103,10 @@ def test_query_events_hides_done_by_default():
     assert titles == ["Vigente"]
 
 
-def test_query_events_includes_done_when_flag_true():
+def test_query_events_includes_done_when_flag_true(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 15))
     a = tools.add_event("Pasado", "2026-05-15T10:00:00", "medical")
     tools.add_event("Vigente", "2026-05-15T11:00:00", "work")
     tools.mark_event_done(a["id"])
@@ -147,8 +156,11 @@ def test_update_event_with_title_keeps_reminder_flags():
     assert row[0] == 1
 
 
-def test_mark_event_done_on_non_recurring_sets_done_flag():
+def test_mark_event_done_on_non_recurring_sets_done_flag(monkeypatch):
     """Comportamiento original intacto: evento puntual -> done=1."""
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 20))
     created = tools.add_event("Médico", "2026-05-20T10:00:00", "medical")
 
     result = tools.mark_event_done(created["id"])
@@ -302,8 +314,11 @@ def test_query_events_recurring_each_instance_independent():
     assert flex_rows[2]["done"] == 0
 
 
-def test_query_events_non_recurring_done_unchanged():
+def test_query_events_non_recurring_done_unchanged(monkeypatch):
     """Eventos puntuales mantienen su .done original."""
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     created = tools.add_event("Médico", "2026-05-19T10:00:00", "medical")
     tools.mark_event_done(created["id"])
 
@@ -526,7 +541,10 @@ def test_best_streak_single_completion_returns_one():
     assert best == 1
 
 
-def test_unmark_event_done_sets_done_zero():
+def test_unmark_event_done_sets_done_zero(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 20))
     e = tools.add_event("Médico", "2026-05-20T10:00:00", "medical")
     tools.mark_event_done(e["id"])
 
@@ -780,3 +798,46 @@ def test_connect_calendar_returns_auth_url():
     with patch("tools.gcal_sync.oauth_start_url", return_value="https://example/auth?x=1"):
         result = tools.connect_calendar()
     assert result == {"auth_url": "https://example/auth?x=1"}
+
+
+def test_mark_event_done_on_time_sets_outcome(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event("Dentista", "2026-05-30T10:00:00", "personal")
+    tools.mark_event_done(res["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM events WHERE id = ?", (res["id"],)
+        ).fetchone()
+    assert row["done"] == 1
+    assert row["outcome"] == "on_time"
+
+
+def test_mark_event_done_grace_when_one_day_late(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 31))
+    res = tools.add_event("Dentista", "2026-05-30T10:00:00", "personal")
+    tools.mark_event_done(res["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM events WHERE id = ?", (res["id"],)
+        ).fetchone()
+    assert row["done"] == 1
+    assert row["outcome"] == "grace"
+
+
+def test_mark_event_done_rejected_out_of_window(monkeypatch):
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 6, 1))
+    res = tools.add_event("Dentista", "2026-05-30T10:00:00", "personal")
+    out = tools.mark_event_done(res["id"])
+    assert out.get("error") == "out_of_window"
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM events WHERE id = ?", (res["id"],)
+        ).fetchone()
+    assert row["done"] == 0
+    assert row["outcome"] is None
