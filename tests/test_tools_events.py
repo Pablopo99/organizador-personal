@@ -168,7 +168,7 @@ def test_mark_event_done_on_non_recurring_sets_done_flag(monkeypatch):
     result = tools.mark_event_done(created["id"])
 
     assert result["updated"] == 1
-    assert result.get("already_done_today") is not True
+    assert result.get("already_done") is not True
     with db.connect() as conn:
         row = conn.execute(
             "SELECT done FROM events WHERE id = ?", (created["id"],)
@@ -191,7 +191,7 @@ def test_mark_event_done_on_recurring_inserts_completion(monkeypatch):
 
     assert result["event_id"] == created["id"]
     assert result["completion_date"] == "2026-05-19"
-    assert result.get("already_done_today") is not True
+    assert result.get("already_done") is not True
 
     with db.connect() as conn:
         row = conn.execute(
@@ -206,7 +206,7 @@ def test_mark_event_done_on_recurring_inserts_completion(monkeypatch):
 
 
 def test_mark_event_done_on_recurring_twice_same_day_idempotent(monkeypatch):
-    """Marcar la misma rutina dos veces el mismo día devuelve already_done_today=True."""
+    """Marcar la misma rutina dos veces el mismo día devuelve already_done=True."""
     from datetime import date
     import date_utils
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
@@ -861,7 +861,7 @@ def test_mark_routine_done_today_on_time(monkeypatch):
     assert row["status"] == "on_time"
 
 
-def test_mark_daily_routine_done_one_day_late_uses_yesterday_with_grace(monkeypatch):
+def test_mark_weekly_sat_routine_done_one_day_late_uses_expected_day_with_grace(monkeypatch):
     """WEEKLY:SAT: si hoy es domingo 31 y no se hizo el sábado 30, se registra el 30 con grace."""
     # 2026-05-30 = sábado, 2026-05-31 = domingo.
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 31))
