@@ -210,7 +210,10 @@ def _make_context_with_bot():
 @pytest.mark.asyncio
 async def test_callback_mark_event_done(temp_db_for_bot, monkeypatch):
     import tools
+    import date_utils
+    from datetime import date
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
 
     query = _make_callback_query(f"mE:{e['id']}")
@@ -424,7 +427,10 @@ async def test_callback_mark_task_in_pending_view(temp_db_for_bot, monkeypatch):
 async def test_callback_old_format_no_view_suffix_defaults_to_hoy(temp_db_for_bot, monkeypatch):
     """callback_data sin sufijo de vista (mE:42) se trata como H."""
     import tools
+    import date_utils
+    from datetime import date
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     e = tools.add_event("Reunión", "2026-05-19T10:00:00", "work")
 
     query = _make_callback_query(f"mE:{e['id']}")
