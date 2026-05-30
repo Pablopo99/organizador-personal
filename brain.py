@@ -76,6 +76,7 @@ Marcar cosas como hechas (TRES herramientas distintas según el tipo):
 - "ya hice/compré X" o "marca X como hecho" para algo SIN fecha → es una tarea → complete_task.
 - "ya he ido al médico", "ya pasó la reunión", "marca como hecho el dentista" para algo CON fecha → es un evento → mark_event_done.
 - "ya cumplí mi objetivo de Y" → es un objetivo → mark_objective_done.
+- Si mark_event_done, complete_task o mark_objective_done devuelve {{"error": "out_of_window"}}, explícale a Pablo que el plazo de gracia ya pasó y dile que recibirá (o ya recibió) un aviso para decidir si pasarlo a hoy o descartarlo. No reintentes la herramienta.
 - No le sermonees al usuario sobre la diferencia técnica entre tipos. Si dice "marca el dentista como pendiente/hecho", entiende que es el evento y usa mark_event_done sin discutir.
 
 Sincronización con Google Calendar:

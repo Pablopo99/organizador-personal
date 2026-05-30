@@ -296,8 +296,8 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             lines.append(f"• {wd} {dt.strftime('%H:%M')} — {e['title']}")
         sections.append("📅 <b>ESTA SEMANA</b>\n" + "\n".join(lines))
 
-    pending_objectives = [o for o in objectives if not o["done"]]
-    done_objectives = [o for o in objectives if o["done"]]
+    pending_objectives = [o for o in objectives if not o["done"] and o.get("outcome") != "missed"]
+    done_objectives = [o for o in objectives if o["done"] and o.get("outcome") != "missed"]
 
     if pending_objectives:
         lines = [f"• {o['text']}" for o in pending_objectives]

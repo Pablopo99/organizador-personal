@@ -58,7 +58,6 @@ _SLASH_PROMPTS = {
         "5. Cierre motivador opcional de UNA frase si encaja.\n"
         "6. Si no hay rutinas (lista vacía del paso 2), responde solo: «Aún no tienes rutinas registradas.»\n"
         "NADA de preámbulos ni preguntas."
-        "NADA de preámbulos ni preguntas."
     ),
 }
 
