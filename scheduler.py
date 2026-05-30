@@ -130,3 +130,154 @@ async def _safe_send_and_mark(context, text: str, event_id: int, flag_column: st
             f"UPDATE events SET {flag_column} = 1 WHERE id = ?",
             (event_id,),
         )
+
+
+async def detect_missed_items(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Detecta ítems que cruzaron a 'perdido' y notifica al usuario."""
+    import date_utils
+    import tools as _tools
+    from datetime import timedelta as _td
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    today = date_utils.today_madrid()
+    yesterday = today - _td(days=1)
+    notify_iso = date_utils.now_iso()
+
+    async def _notify_with_buttons(item_kind: str, item_id: int, title: str) -> None:
+        prefix_recreate = {"event": "rE", "task": "rT", "objective": "rO"}[item_kind]
+        prefix_discard = {"event": "dE", "task": "dT", "objective": "dO"}[item_kind]
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📌 Pasar a hoy",
+                                 callback_data=f"{prefix_recreate}:{item_id}"),
+            InlineKeyboardButton("🗑️ Descartar",
+                                 callback_data=f"{prefix_discard}:{item_id}"),
+        ]])
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=f"⚠️ Se te ha pasado: <b>{title}</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+        except Exception:
+            log.exception("Error notificando perdido %s/%s", item_kind, item_id)
+
+    async def _notify_routine(event_id: int, title: str, streak_before: int) -> None:
+        text = (
+            f"⚠️ Se rompió tu racha de <b>{title}</b>"
+            + (f" (llevabas {streak_before} días)." if streak_before > 0 else ".")
+            + "\nLa rutina sigue activa, vuelve a empezar cuando quieras."
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=text,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception("Error notificando rotura de racha %s", event_id)
+
+    with db.connect() as conn:
+        # Tareas perdidas
+        rows = conn.execute(
+            """
+            SELECT id, text FROM tasks
+            WHERE done = 0 AND outcome IS NULL
+              AND due_date IS NOT NULL
+              AND due_date < ?
+            """,
+            (yesterday.isoformat(),),
+        ).fetchall()
+        for r in rows:
+            try:
+                conn.execute(
+                    "INSERT INTO missed_notifications "
+                    "(item_type, item_id, notified_at) VALUES ('task', ?, ?)",
+                    (r["id"], notify_iso),
+                )
+            except Exception:
+                continue
+            await _notify_with_buttons("task", r["id"], r["text"])
+
+        # Eventos puntuales perdidos
+        rows = conn.execute(
+            """
+            SELECT id, title FROM events
+            WHERE done = 0 AND outcome IS NULL
+              AND recurring_rule IS NULL
+              AND substr(datetime, 1, 10) < ?
+            """,
+            (yesterday.isoformat(),),
+        ).fetchall()
+        for r in rows:
+            try:
+                conn.execute(
+                    "INSERT INTO missed_notifications "
+                    "(item_type, item_id, notified_at) VALUES ('event', ?, ?)",
+                    (r["id"], notify_iso),
+                )
+            except Exception:
+                continue
+            await _notify_with_buttons("event", r["id"], r["title"])
+
+        # Objetivos perdidos
+        from date_utils import monday_of_week
+        cutoff_obj = monday_of_week(today) - _td(days=14)
+        rows = conn.execute(
+            """
+            SELECT id, text, week_start FROM objectives
+            WHERE done = 0 AND outcome IS NULL
+              AND week_start <= ?
+            """,
+            (cutoff_obj.isoformat(),),
+        ).fetchall()
+        for r in rows:
+            try:
+                conn.execute(
+                    "INSERT INTO missed_notifications "
+                    "(item_type, item_id, notified_at) VALUES ('objective', ?, ?)",
+                    (r["id"], notify_iso),
+                )
+            except Exception:
+                continue
+            await _notify_with_buttons("objective", r["id"], r["text"])
+
+        # Rutinas: notificar rotura de racha
+        routine_rows = conn.execute(
+            "SELECT id, title, recurring_rule, datetime FROM events "
+            "WHERE recurring_rule IS NOT NULL"
+        ).fetchall()
+        for r in routine_rows:
+            rule = r["recurring_rule"]
+            lost_date = _tools._previous_expected_date(rule, yesterday)
+            if lost_date is None:
+                continue
+            done_row = conn.execute(
+                "SELECT 1 FROM routine_completions "
+                "WHERE event_id = ? AND completion_date = ?",
+                (r["id"], lost_date.isoformat()),
+            ).fetchone()
+            if done_row:
+                continue
+            prior = _tools._previous_expected_date(rule, lost_date)
+            if prior is None:
+                continue
+            prior_done = conn.execute(
+                "SELECT 1 FROM routine_completions "
+                "WHERE event_id = ? AND completion_date = ?",
+                (r["id"], prior.isoformat()),
+            ).fetchone()
+            if not prior_done:
+                continue
+            try:
+                conn.execute(
+                    "INSERT INTO missed_notifications "
+                    "(item_type, item_id, occurrence_date, notified_at) "
+                    "VALUES ('routine', ?, ?, ?)",
+                    (r["id"], lost_date.isoformat(), notify_iso),
+                )
+            except Exception:
+                continue
+            streak_before = _tools._current_streak(r["id"], rule, prior, conn)
+            await _notify_routine(r["id"], r["title"], streak_before)
