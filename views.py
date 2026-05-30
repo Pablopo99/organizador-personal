@@ -341,3 +341,74 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
 
     keyboard = InlineKeyboardMarkup(buttons) if buttons else None
     return text, keyboard
+
+
+def render_metrics_view(
+    today: date, conn
+) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Panel de métricas de los últimos 30 días."""
+    from datetime import timedelta
+
+    date_from = (today - timedelta(days=29)).isoformat()
+    date_to = today.isoformat()
+    m = tools.metrics_summary(date_from, date_to)
+
+    routine_totals = m["routines"]["totals"]
+    has_any = (
+        sum(routine_totals.values()) > 0
+        or sum(m["events"].values()) > 0
+        or sum(m["tasks"].values()) > 0
+        or sum(m["objectives"].values()) > 0
+    )
+    if not has_any:
+        return "Todavía no hay datos suficientes para mostrar métricas.", None
+
+    def _pct(d: dict) -> str:
+        total = d["on_time"] + d["grace"] + d["missed"]
+        if total == 0:
+            return ""
+        ot = round(100 * d["on_time"] / total)
+        gr = round(100 * d["grace"] / total)
+        ms = round(100 * d["missed"] / total)
+        return f"({ot}% / {gr}% / {ms}%)"
+
+    sections: list[str] = [
+        f"📊 <b>Métricas — últimos 30 días</b>"
+    ]
+
+    if m["routines"]["per_event"]:
+        lines = []
+        for r in m["routines"]["per_event"]:
+            d = {"on_time": r["on_time"], "grace": r["grace"], "missed": r["missed"]}
+            lines.append(
+                f"• {r['title']}: 🟢 {r['on_time']}  🟡 {r['grace']}  🔴 {r['missed']}  {_pct(d)}"
+            )
+        lines.append(
+            f"  <b>Total</b>: 🟢 {routine_totals['on_time']}  "
+            f"🟡 {routine_totals['grace']}  🔴 {routine_totals['missed']}  "
+            f"{_pct(routine_totals)}"
+        )
+        sections.append("🔁 <b>Rutinas</b>\n" + "\n".join(lines))
+
+    ev = m["events"]
+    if sum(ev.values()) > 0:
+        sections.append(
+            "📅 <b>Eventos puntuales</b>\n"
+            f"🟢 {ev['on_time']}  🟡 {ev['grace']}  🔴 {ev['missed']}  {_pct(ev)}"
+        )
+
+    tk = m["tasks"]
+    if sum(tk.values()) > 0:
+        sections.append(
+            "✅ <b>Tareas</b>\n"
+            f"🟢 {tk['on_time']}  🟡 {tk['grace']}  🔴 {tk['missed']}  {_pct(tk)}"
+        )
+
+    ob = m["objectives"]
+    if sum(ob.values()) > 0:
+        sections.append(
+            "🎯 <b>Objetivos semanales</b>\n"
+            f"🟢 {ob['on_time']}  🟡 {ob['grace']}  🔴 {ob['missed']}  {_pct(ob)}"
+        )
+
+    return "\n\n".join(sections), None

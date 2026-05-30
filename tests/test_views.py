@@ -546,3 +546,24 @@ def test_pending_view_excludes_missed_tasks(monkeypatch):
         text, keyboard = views.render_pending_view(conn)
 
     assert "descartada" not in text
+
+
+def test_metrics_view_empty():
+    with db.connect() as conn:
+        text, kb = views.render_metrics_view(date(2026, 5, 30), conn)
+    assert "sin datos" in text.lower() or "todavía" in text.lower()
+
+
+def test_metrics_view_with_data(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    a = tools.add_task("on", due_date="2026-05-30")
+    b = tools.add_task("late", due_date="2026-05-29")
+    tools.complete_task(a["id"])
+    tools.complete_task(b["id"])
+
+    with db.connect() as conn:
+        text, kb = views.render_metrics_view(date(2026, 5, 30), conn)
+
+    assert "Métricas" in text
+    assert "Tareas" in text
+    assert "50%" in text
