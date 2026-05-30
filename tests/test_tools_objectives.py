@@ -1,8 +1,10 @@
 import os
 import tempfile
+from datetime import date
 
 import pytest
 
+import date_utils
 import db
 import tools
 
@@ -42,7 +44,9 @@ def test_query_objectives_all_when_no_week():
     assert len(rows) == 2
 
 
-def test_mark_objective_done():
+def test_mark_objective_done(monkeypatch):
+    # Monkeypatch today to be within the week of 2026-05-11 (lunes).
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 15))
     res = tools.add_objective("Hacer X", "2026-05-11")
     tools.mark_objective_done(res["id"])
     rows = tools.query_objectives("2026-05-11")
@@ -71,3 +75,43 @@ def test_unmark_objective_done_idempotent():
             "SELECT done FROM objectives WHERE id = ?", (o["id"],)
         ).fetchone()
     assert row[0] == 0
+
+
+def test_mark_objective_on_time(monkeypatch):
+    # 2026-05-25 es lunes; semana actual.
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Leer 100 páginas", "2026-05-25")
+    tools.mark_objective_done(o["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row["done"] == 1
+    assert row["outcome"] == "on_time"
+
+
+def test_mark_objective_grace_next_week(monkeypatch):
+    # Objetivo de la semana del 18-may; hoy es 28-may (jueves de la semana siguiente).
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Leer 100 páginas", "2026-05-18")
+    tools.mark_objective_done(o["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row["done"] == 1
+    assert row["outcome"] == "grace"
+
+
+def test_mark_objective_rejected_two_weeks_late(monkeypatch):
+    # Objetivo de la semana del 11-may; hoy 28-may (2 semanas más tarde).
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Leer", "2026-05-11")
+    out = tools.mark_objective_done(o["id"])
+    assert out.get("error") == "out_of_window"
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT done, outcome FROM objectives WHERE id = ?", (o["id"],)
+        ).fetchone()
+    assert row["done"] == 0
+    assert row["outcome"] is None

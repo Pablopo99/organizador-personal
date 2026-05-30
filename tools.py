@@ -568,11 +568,34 @@ def query_objectives(week_start: Optional[str]) -> list[dict]:
 
 
 def mark_objective_done(objective_id: int) -> dict:
+    from date_utils import monday_of_week
+    import date_utils
+
+    today = date_utils.today_madrid()
+    today_monday = monday_of_week(today)
+
     with db.connect() as conn:
+        row = conn.execute(
+            "SELECT week_start FROM objectives WHERE id = ?", (objective_id,)
+        ).fetchone()
+        if row is None:
+            return {"id": objective_id, "updated": 0, "error": "not_found"}
+
+        week_start = date.fromisoformat(row["week_start"])
+        weeks_diff = (today_monday - week_start).days // 7
+
+        if weeks_diff <= 0:
+            outcome = "on_time"
+        elif weeks_diff == 1:
+            outcome = "grace"
+        else:
+            return {"id": objective_id, "updated": 0, "error": "out_of_window"}
+
         cur = conn.execute(
-            "UPDATE objectives SET done = 1 WHERE id = ?", (objective_id,)
+            "UPDATE objectives SET done = 1, outcome = ? WHERE id = ?",
+            (outcome, objective_id),
         )
-    return {"id": objective_id, "updated": cur.rowcount}
+    return {"id": objective_id, "updated": cur.rowcount, "outcome": outcome}
 
 
 def unmark_objective_done(objective_id: int) -> dict:
