@@ -16,6 +16,25 @@ _WEEKDAY_MAP = {
 }
 
 
+def _calculate_outcome(assigned: Optional[date], today: date) -> Optional[str]:
+    """Devuelve 'on_time', 'grace' o None (fuera de ventana / sin fecha).
+
+    Regla:
+    - today <= assigned     -> 'on_time'
+    - today == assigned + 1 -> 'grace'
+    - today >= assigned + 2 -> None (cliente debe rechazar el mark)
+    - assigned is None      -> None (item sin fecha; outcome se deja NULL)
+    """
+    if assigned is None:
+        return None
+    delta = (today - assigned).days
+    if delta <= 0:
+        return "on_time"
+    if delta == 1:
+        return "grace"
+    return None
+
+
 # ---------------------------------------------------------------- events ----
 
 def add_event(
