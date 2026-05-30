@@ -14,24 +14,52 @@ import tools
 def render_today_view(
     today: date, conn, show_completed: bool = False
 ) -> tuple[str, Optional[InlineKeyboardMarkup]]:
-    today_start = f"{today.isoformat()}T00:00:00"
-    today_end = f"{today.isoformat()}T23:59:59"
+    from datetime import timedelta
 
-    events = tools.query_events(today_start, today_end, include_done=True)
+    today_iso = today.isoformat()
+    yesterday = today - timedelta(days=1)
+    yesterday_iso = yesterday.isoformat()
+    today_start = f"{today_iso}T00:00:00"
+    today_end = f"{today_iso}T23:59:59"
+
+    events = tools.query_events(
+        today_start, today_end, include_done=True, include_grace=True
+    )
     tasks_all = tools.list_tasks(include_done=True)
-    routines = tools.routine_summary(today.isoformat(), today.isoformat())
+    routines = tools.routine_summary(today_iso, today_iso)
     streak_by_id = {r["event_id"]: r["current_streak"] for r in routines}
 
-    hoy_pending = [e for e in events if not e.get("recurring_rule") and e["done"] == 0]
-    hoy_done = [e for e in events if not e.get("recurring_rule") and e["done"] == 1]
+    hoy_pending: list[dict] = []
+    grace_pending: list[dict] = []
+    hoy_done: list[dict] = []
+    for e in events:
+        if e.get("recurring_rule"):
+            continue
+        ev_day = e["datetime"][:10]
+        if ev_day == today_iso:
+            if e["done"] == 1:
+                hoy_done.append(e)
+            else:
+                hoy_pending.append(e)
+        elif ev_day == yesterday_iso and e["done"] == 0:
+            grace_pending.append(e)
+
     rutina_pending = [e for e in events if e.get("recurring_rule") and e["done"] == 0]
     rutina_done = [e for e in events if e.get("recurring_rule") and e["done"] == 1]
 
-    task_pending = [t for t in tasks_all if t["done"] == 0]
-    today_prefix = today.isoformat()
+    task_pending_today = [
+        t for t in tasks_all
+        if t["done"] == 0 and t.get("due_date") == today_iso
+        and t.get("outcome") != "missed"
+    ]
+    task_grace = [
+        t for t in tasks_all
+        if t["done"] == 0 and t.get("due_date") == yesterday_iso
+        and t.get("outcome") != "missed"
+    ]
     task_done_today = [
         t for t in tasks_all
-        if t["done"] == 1 and (t.get("done_at") or "").startswith(today_prefix)
+        if t["done"] == 1 and (t.get("done_at") or "").startswith(today_iso)
     ]
 
     has_completed = bool(hoy_done or rutina_done or task_done_today)
@@ -39,6 +67,15 @@ def render_today_view(
     view_letter = "Hc" if show_completed else "H"
 
     sections: list[str] = []
+
+    if grace_pending or task_grace:
+        lines = []
+        for e in grace_pending:
+            dt = datetime.fromisoformat(e["datetime"])
+            lines.append(f"• {dt.strftime('%H:%M')} — {e['title']}")
+        for t in task_grace:
+            lines.append(f"• {t['text']}")
+        sections.append("🟡 <b>AYER (último día)</b>\n" + "\n".join(lines))
 
     if hoy_pending:
         lines = []
@@ -55,8 +92,8 @@ def render_today_view(
             lines.append(f"• {e['title']}{suffix}")
         sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
 
-    if task_pending:
-        lines = [f"• {t['text']}" for t in task_pending]
+    if task_pending_today:
+        lines = [f"• {t['text']}" for t in task_pending_today]
         sections.append("📝 <b>PENDIENTES</b>\n" + "\n".join(lines))
 
     if show_completed and has_completed:
@@ -78,6 +115,14 @@ def render_today_view(
     text = "\n\n".join(sections)
 
     buttons: list[list[InlineKeyboardButton]] = []
+    for e in grace_pending:
+        buttons.append([InlineKeyboardButton(
+            f"🟡 {e['title']} (ayer)", callback_data=f"mE:{e['id']}:{view_letter}"
+        )])
+    for t in task_grace:
+        buttons.append([InlineKeyboardButton(
+            f"🟡 {t['text']} (ayer)", callback_data=f"mT:{t['id']}:{view_letter}"
+        )])
     for e in hoy_pending:
         buttons.append([InlineKeyboardButton(
             f"🔲 {e['title']}", callback_data=f"mE:{e['id']}:{view_letter}"
@@ -86,7 +131,7 @@ def render_today_view(
         buttons.append([InlineKeyboardButton(
             f"🔲 {e['title']}", callback_data=f"mR:{e['id']}:{view_letter}"
         )])
-    for t in task_pending:
+    for t in task_pending_today:
         buttons.append([InlineKeyboardButton(
             f"🔲 {t['text']}", callback_data=f"mT:{t['id']}:{view_letter}"
         )])

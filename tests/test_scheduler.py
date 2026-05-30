@@ -55,9 +55,13 @@ async def test_morning_summary_empty_db_says_day_libre(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_morning_summary_with_pending_item_includes_keyboard(monkeypatch):
+    import date_utils
     import tools
+    from datetime import date
+    fixed_today = date(2026, 5, 19)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: fixed_today)
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
-    tools.add_task("comprar pan")
+    tools.add_task("comprar pan", due_date=fixed_today.isoformat())
 
     send_mock = AsyncMock()
     await scheduler.morning_summary(_fake_context(send_mock))

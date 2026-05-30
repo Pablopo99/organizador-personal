@@ -120,7 +120,7 @@ def test_render_routine_with_streak_shows_fire(monkeypatch):
 
 
 def test_render_task_pending_with_button():
-    t = tools.add_task("comprar pan")
+    t = tools.add_task("comprar pan", due_date="2026-05-19")
 
     text, keyboard = _render()
 
@@ -483,3 +483,33 @@ def test_render_tomorrow_view_weekly_routine_only_shows_when_matches():
     # Mañana = jueves 21 → no debe aparecer
     text_thu, _ = _render_tomorrow(tomorrow=date(2026, 5, 21))
     assert "Gimnasio" not in text_thu
+
+
+def test_render_today_view_shows_grace_section_for_event():
+    tools.add_event("Cita perdida", "2026-05-18T10:00:00", "personal")
+    text, keyboard = _render(today=date(2026, 5, 19))
+    assert "AYER" in text
+    assert "Cita perdida" in text
+
+
+def test_render_today_view_grace_button_uses_mE():
+    res = tools.add_event("Cita perdida", "2026-05-18T10:00:00", "personal")
+    text, keyboard = _render(today=date(2026, 5, 19))
+    callbacks = [
+        btn.callback_data
+        for row in keyboard.inline_keyboard for btn in row
+    ]
+    assert f"mE:{res['id']}:H" in callbacks
+
+
+def test_render_today_view_filters_tasks_by_due_date():
+    tools.add_task("hoy", due_date="2026-05-19")
+    tools.add_task("manana", due_date="2026-05-20")
+    tools.add_task("flotante")
+    tools.add_task("ayer", due_date="2026-05-18")
+
+    text, keyboard = _render(today=date(2026, 5, 19))
+    assert "hoy" in text
+    assert "ayer" in text
+    assert "manana" not in text
+    assert "flotante" not in text
