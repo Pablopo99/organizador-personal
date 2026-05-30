@@ -87,3 +87,37 @@ def test_recreate_objective_creates_new_in_current_week(monkeypatch):
     assert new_row["outcome"] is None
     assert new_row["done"] == 0
     assert old_row["outcome"] == "missed"
+
+
+def test_discard_task_marks_missed():
+    orig = tools.add_task("X", due_date="2026-05-20")
+    res = tools.discard_task(orig["id"])
+    assert res["updated"] == 1
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT outcome, done FROM tasks WHERE id = ?", (orig["id"],)
+        ).fetchone()
+    assert row["outcome"] == "missed"
+    assert row["done"] == 0
+
+
+def test_discard_event_marks_missed():
+    orig = tools.add_event("Cita", "2026-05-20T10:00:00", "personal")
+    tools.discard_event(orig["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT outcome, done FROM events WHERE id = ?", (orig["id"],)
+        ).fetchone()
+    assert row["outcome"] == "missed"
+    assert row["done"] == 0
+
+
+def test_discard_objective_marks_missed():
+    orig = tools.add_objective("Meta vieja", "2026-05-11")
+    tools.discard_objective(orig["id"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT outcome, done FROM objectives WHERE id = ?", (orig["id"],)
+        ).fetchone()
+    assert row["outcome"] == "missed"
+    assert row["done"] == 0

@@ -460,6 +460,33 @@ def recreate_objective(objective_id: int) -> dict:
     return {"old_id": objective_id, "new_id": new_id, "week_start": week_start}
 
 
+def discard_event(event_id: int) -> dict:
+    """Marca un evento como outcome='missed' sin tocar done."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE events SET outcome = 'missed' WHERE id = ?", (event_id,)
+        )
+    return {"id": event_id, "updated": cur.rowcount}
+
+
+def discard_task(task_id: int) -> dict:
+    """Marca una tarea como outcome='missed' sin tocar done."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE tasks SET outcome = 'missed' WHERE id = ?", (task_id,)
+        )
+    return {"id": task_id, "updated": cur.rowcount}
+
+
+def discard_objective(objective_id: int) -> dict:
+    """Marca un objetivo como outcome='missed' sin tocar done."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE objectives SET outcome = 'missed' WHERE id = ?", (objective_id,)
+        )
+    return {"id": objective_id, "updated": cur.rowcount}
+
+
 def _completion_dates(event_id: int, conn) -> list:
     """Devuelve las fechas de completion como objetos date, ordenadas asc."""
     rows = conn.execute(
