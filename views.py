@@ -363,15 +363,6 @@ def render_metrics_view(
     if not has_any:
         return "Todavía no hay datos suficientes para mostrar métricas.", None
 
-    def _pct(d: dict) -> str:
-        total = d["on_time"] + d["grace"] + d["missed"]
-        if total == 0:
-            return ""
-        ot = round(100 * d["on_time"] / total)
-        gr = round(100 * d["grace"] / total)
-        ms = round(100 * d["missed"] / total)
-        return f"({ot}% / {gr}% / {ms}%)"
-
     sections: list[str] = [
         f"📊 <b>Métricas — últimos 30 días</b>"
     ]
@@ -379,14 +370,12 @@ def render_metrics_view(
     if m["routines"]["per_event"]:
         lines = []
         for r in m["routines"]["per_event"]:
-            d = {"on_time": r["on_time"], "grace": r["grace"], "missed": r["missed"]}
             lines.append(
-                f"• {r['title']}: 🟢 {r['on_time']}  🟡 {r['grace']}  🔴 {r['missed']}  {_pct(d)}"
+                f"• {r['title']}: 🟢 {r['on_time']}  🟡 {r['grace']}  🔴 {r['missed']}"
             )
         lines.append(
             f"  <b>Total</b>: 🟢 {routine_totals['on_time']}  "
-            f"🟡 {routine_totals['grace']}  🔴 {routine_totals['missed']}  "
-            f"{_pct(routine_totals)}"
+            f"🟡 {routine_totals['grace']}  🔴 {routine_totals['missed']}"
         )
         sections.append("🔁 <b>Rutinas</b>\n" + "\n".join(lines))
 
@@ -394,21 +383,21 @@ def render_metrics_view(
     if sum(ev.values()) > 0:
         sections.append(
             "📅 <b>Eventos puntuales</b>\n"
-            f"🟢 {ev['on_time']}  🟡 {ev['grace']}  🔴 {ev['missed']}  {_pct(ev)}"
+            f"🟢 {ev['on_time']}  🟡 {ev['grace']}  🔴 {ev['missed']}"
         )
 
     tk = m["tasks"]
     if sum(tk.values()) > 0:
         sections.append(
             "✅ <b>Tareas</b>\n"
-            f"🟢 {tk['on_time']}  🟡 {tk['grace']}  🔴 {tk['missed']}  {_pct(tk)}"
+            f"🟢 {tk['on_time']}  🟡 {tk['grace']}  🔴 {tk['missed']}"
         )
 
     ob = m["objectives"]
     if sum(ob.values()) > 0:
         sections.append(
             "🎯 <b>Objetivos semanales</b>\n"
-            f"🟢 {ob['on_time']}  🟡 {ob['grace']}  🔴 {ob['missed']}  {_pct(ob)}"
+            f"🟢 {ob['on_time']}  🟡 {ob['grace']}  🔴 {ob['missed']}"
         )
 
     return "\n\n".join(sections), None

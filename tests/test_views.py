@@ -566,4 +566,7 @@ def test_metrics_view_with_data(monkeypatch):
 
     assert "Métricas" in text
     assert "Tareas" in text
-    assert "50%" in text
+    # 1 on_time + 1 grace + 0 missed → counts visibles, sin porcentajes
+    assert "🟢 1" in text
+    assert "🟡 1" in text
+    assert "%" not in text
