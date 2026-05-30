@@ -678,6 +678,76 @@ def uncomplete_task(task_id: int) -> dict:
     return {"id": task_id, "updated": cur.rowcount}
 
 
+def metrics_summary(date_from: str, date_to: str) -> dict:
+    """Conteos agregados por outcome para el rango [date_from, date_to] inclusive."""
+    start = date.fromisoformat(date_from)
+    end = date.fromisoformat(date_to)
+
+    def _count_outcomes(rows: list) -> dict:
+        return {
+            "on_time": sum(1 for r in rows if r["outcome"] == "on_time"),
+            "grace":   sum(1 for r in rows if r["outcome"] == "grace"),
+            "missed":  sum(1 for r in rows if r["outcome"] == "missed"),
+        }
+
+    with db.connect() as conn:
+        ev_rows = conn.execute(
+            """
+            SELECT outcome FROM events
+            WHERE recurring_rule IS NULL
+              AND outcome IS NOT NULL
+              AND substr(datetime, 1, 10) >= ?
+              AND substr(datetime, 1, 10) <= ?
+            """,
+            (date_from, date_to),
+        ).fetchall()
+        task_rows = conn.execute(
+            """
+            SELECT outcome FROM tasks
+            WHERE due_date IS NOT NULL
+              AND outcome IS NOT NULL
+              AND due_date >= ?
+              AND due_date <= ?
+            """,
+            (date_from, date_to),
+        ).fetchall()
+        obj_rows = conn.execute(
+            """
+            SELECT outcome FROM objectives
+            WHERE outcome IS NOT NULL
+              AND week_start >= ?
+              AND week_start <= ?
+            """,
+            (date_from, date_to),
+        ).fetchall()
+
+    routine_rows = routine_summary(date_from, date_to)
+
+    per_event = []
+    routine_totals = {"on_time": 0, "grace": 0, "missed": 0}
+    for r in routine_rows:
+        on_t = r["on_time_count"]
+        gr = r["grace_count"]
+        missed = max(0, r["scheduled_days"] - on_t - gr)
+        per_event.append({
+            "event_id": r["event_id"],
+            "title": r["title"],
+            "on_time": on_t,
+            "grace": gr,
+            "missed": missed,
+        })
+        routine_totals["on_time"] += on_t
+        routine_totals["grace"] += gr
+        routine_totals["missed"] += missed
+
+    return {
+        "events": _count_outcomes(ev_rows),
+        "tasks": _count_outcomes(task_rows),
+        "objectives": _count_outcomes(obj_rows),
+        "routines": {"per_event": per_event, "totals": routine_totals},
+    }
+
+
 # -------------------------------------------------------------- registry ----
 
 TOOL_DEFINITIONS: list[dict] = [
@@ -883,6 +953,22 @@ TOOL_DEFINITIONS: list[dict] = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "metrics_summary",
+        "description": (
+            "Conteos agregados por outcome (on_time/grace/missed) para rutinas, "
+            "eventos puntuales, tareas y objetivos en un rango de fechas. Útil "
+            "cuando el usuario pregunta por sus métricas o porcentajes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date_from": {"type": "string", "description": "ISO date YYYY-MM-DD"},
+                "date_to":   {"type": "string", "description": "ISO date YYYY-MM-DD"},
+            },
+            "required": ["date_from", "date_to"],
+        },
+    },
 ]
 
 
@@ -901,6 +987,7 @@ _DISPATCH = {
     "complete_task": complete_task,
     "push_event_to_calendar": push_event_to_calendar,
     "connect_calendar": connect_calendar,
+    "metrics_summary": metrics_summary,
 }
 
 
