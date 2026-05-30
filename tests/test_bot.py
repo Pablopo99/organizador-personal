@@ -454,3 +454,33 @@ def test_callback_action_gc_calls_push_event_to_calendar(monkeypatch):
     result = handler(99)
     assert called["event_id"] == 99
     assert result["synced"] is True
+
+
+@pytest.mark.asyncio
+async def test_on_metricas_sends_text(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 42
+
+    await bot._on_metricas(update, MagicMock())
+
+    reply_mock.assert_called_once()
+    args, kwargs = reply_mock.call_args
+    text = args[0] if args else kwargs.get("text")
+    assert "métricas" in text.lower() or "datos" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_on_metricas_unauthorized_user_ignored(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 999
+
+    await bot._on_metricas(update, MagicMock())
+
+    reply_mock.assert_not_called()

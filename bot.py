@@ -260,6 +260,25 @@ async def _on_semana(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _on_metricas(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/metricas: panel de últimos 30 días, vista determinística."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/metricas ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_metrics_view(today, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 _CALLBACK_ACTIONS = {
     "mE": lambda i: tools.mark_event_done(i),
     "uE": lambda i: tools.unmark_event_done(i),
@@ -373,6 +392,7 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("pendientes", "Tareas pendientes"),
         BotCommand("objetivos", "Objetivos de la semana"),
         BotCommand("rachas", "Mis rachas"),
+        BotCommand("metricas", "Métricas de cumplimiento"),
         BotCommand("nueva", "Reiniciar conversación"),
     ])
 
@@ -396,6 +416,7 @@ async def _async_main() -> None:
     app.add_handler(CommandHandler("manana", _on_manana))
     app.add_handler(CommandHandler("pendientes", _on_pendientes))
     app.add_handler(CommandHandler("semana", _on_semana))
+    app.add_handler(CommandHandler("metricas", _on_metricas))
     for cmd in ("objetivos", "rachas"):
         app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
 
