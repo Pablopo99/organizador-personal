@@ -221,6 +221,48 @@ def _check_and_award_perfect_day(conn, today: date) -> int:
     return 20
 
 
+def _check_and_award_perfect_week(conn, today: date) -> int:
+    """Evalúa la semana pasada (lunes-domingo) y otorga +100 XP si todos
+    los objetivos fueron done con outcome on_time/grace. Llamar solo en lunes."""
+    from datetime import timedelta
+    from date_utils import monday_of_week
+    import date_utils
+
+    last_monday = monday_of_week(today) - timedelta(days=7)
+    last_monday_iso = last_monday.isoformat()
+
+    # Ya otorgado hoy
+    existing = conn.execute(
+        "SELECT 1 FROM xp_log "
+        "WHERE item_type = 'perfect_week' "
+        "AND substr(awarded_at, 1, 10) = ?",
+        (today.isoformat(),),
+    ).fetchone()
+    if existing:
+        return 0
+
+    objs = conn.execute(
+        "SELECT done, outcome FROM objectives WHERE week_start = ?",
+        (last_monday_iso,),
+    ).fetchall()
+    if not objs:
+        return 0
+    all_done = all(
+        o["done"] == 1 and o["outcome"] in ("on_time", "grace")
+        for o in objs
+    )
+    if not all_done:
+        return 0
+
+    conn.execute(
+        "INSERT INTO xp_log "
+        "(item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at) "
+        "VALUES ('perfect_week', 0, 'bonus', 100, 0, ?)",
+        (today.isoformat() + "T00:00:00",),
+    )
+    return 100
+
+
 # ---------------------------------------------------------------- events ----
 
 def add_event(

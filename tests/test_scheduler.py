@@ -232,6 +232,25 @@ async def test_morning_summary_martes_no_incluye_bloque_semanal(monkeypatch):
     assert "Tu semana pasada" not in text
 
 
+@pytest.mark.asyncio
+async def test_morning_summary_lunes_perfect_week_bonus(monkeypatch):
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    # Lunes 2026-06-01; semana pasada empieza 2026-05-25
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 5, 25))
+    import tools
+    o = tools.add_objective("A", "2026-05-25")
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 5, 28))
+    tools.mark_objective_done(o["id"])
+    monkeypatch.setattr(_date_utils, "today_madrid", lambda: _date(2026, 6, 1))
+
+    send_mock = AsyncMock()
+    await scheduler.morning_summary(_fake_context(send_mock))
+
+    text = send_mock.call_args.kwargs["text"]
+    assert "Semana perfecta" in text
+    assert "+100 XP" in text
+
+
 def test_ptb_days_convention_zero_is_sunday():
     """Sanity check: en python-telegram-bot v21 days=(0,) es domingo.
 

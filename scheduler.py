@@ -38,10 +38,16 @@ async def morning_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
         last_monday = today - _td(days=7)
         last_sunday = today - _td(days=1)
         try:
+            with db.connect() as conn:
+                perfect_week_awarded = _tools._check_and_award_perfect_week(
+                    conn, today
+                )
             m = _tools.metrics_summary(
                 last_monday.isoformat(), last_sunday.isoformat()
             )
             weekly_block = _format_weekly_block(m)
+            if perfect_week_awarded > 0:
+                weekly_block += "   🏆 ¡Semana perfecta! +100 XP\n\n"
         except Exception:
             log.exception("Error generando bloque semanal del lunes")
             weekly_block = ""
