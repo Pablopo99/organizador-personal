@@ -135,6 +135,92 @@ def _get_xp_total_with_conn(conn) -> int:
     return row["total"] or 0
 
 
+def _check_and_award_perfect_day(conn, today: date) -> int:
+    """Comprueba si hoy es perfecto y, si lo es y aún no se ha otorgado,
+    inserta la fila perfect_day y devuelve 20. Si no aplica, devuelve 0."""
+    import date_utils
+    today_iso = today.isoformat()
+
+    # ¿Ya otorgado hoy?
+    existing = conn.execute(
+        "SELECT 1 FROM xp_log "
+        "WHERE item_type = 'perfect_day' "
+        "AND substr(awarded_at, 1, 10) = ?",
+        (today_iso,),
+    ).fetchone()
+    if existing:
+        return 0
+
+    # Rutinas esperadas hoy
+    routines = conn.execute(
+        "SELECT id, recurring_rule FROM events WHERE recurring_rule IS NOT NULL"
+    ).fetchall()
+    expected_routine_ids = set()
+    for r in routines:
+        expected = _most_recent_expected_date(r["recurring_rule"], today)
+        if expected == today:
+            expected_routine_ids.add(r["id"])
+    if expected_routine_ids:
+        placeholders = ",".join(["?"] * len(expected_routine_ids))
+        completed = conn.execute(
+            f"SELECT event_id FROM routine_completions "
+            f"WHERE completion_date = ? "
+            f"AND event_id IN ({placeholders})",
+            [today_iso, *expected_routine_ids],
+        ).fetchall()
+        completed_ids = {c["event_id"] for c in completed}
+        if completed_ids != expected_routine_ids:
+            return 0
+
+    # Tareas con due_date=hoy pendientes
+    pending_tasks = conn.execute(
+        "SELECT COUNT(*) FROM tasks "
+        "WHERE due_date = ? AND done = 0 "
+        "AND (outcome IS NULL OR outcome != 'missed')",
+        (today_iso,),
+    ).fetchone()[0]
+    if pending_tasks > 0:
+        return 0
+
+    # Eventos puntuales de hoy pendientes
+    pending_events = conn.execute(
+        "SELECT COUNT(*) FROM events "
+        "WHERE recurring_rule IS NULL "
+        "AND substr(datetime, 1, 10) = ? "
+        "AND done = 0 "
+        "AND (outcome IS NULL OR outcome != 'missed')",
+        (today_iso,),
+    ).fetchone()[0]
+    if pending_events > 0:
+        return 0
+
+    # ¿Había algo evaluable hoy?
+    total_today_tasks = conn.execute(
+        "SELECT COUNT(*) FROM tasks WHERE due_date = ?",
+        (today_iso,),
+    ).fetchone()[0]
+    total_today_events = conn.execute(
+        "SELECT COUNT(*) FROM events "
+        "WHERE recurring_rule IS NULL "
+        "AND substr(datetime, 1, 10) = ?",
+        (today_iso,),
+    ).fetchone()[0]
+    total_today = (
+        len(expected_routine_ids) + total_today_tasks + total_today_events
+    )
+    if total_today == 0:
+        return 0
+
+    # Otorgar
+    conn.execute(
+        "INSERT INTO xp_log "
+        "(item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at) "
+        "VALUES ('perfect_day', 0, 'bonus', 20, 0, ?)",
+        (date_utils.now_iso(),),
+    )
+    return 20
+
+
 # ---------------------------------------------------------------- events ----
 
 def add_event(
@@ -450,6 +536,7 @@ def mark_event_done(event_id: int) -> dict:
                 conn, "routine", event_id, status,
                 xp_amount=xp_amount, streak_bonus=streak_bonus,
             )
+            perfect_day_bonus = _check_and_award_perfect_day(conn, today)
             level_after = compute_level(_get_xp_total_with_conn(conn))
 
             return {
@@ -459,6 +546,7 @@ def mark_event_done(event_id: int) -> dict:
                 "updated": 1,
                 "xp_awarded": xp_amount,
                 "streak_bonus": streak_bonus,
+                "perfect_day_bonus": perfect_day_bonus,
                 "level_before": level_before,
                 "level_after": level_after,
             }
@@ -480,6 +568,7 @@ def mark_event_done(event_id: int) -> dict:
 
         xp_amount, _ = _calculate_xp("event", outcome)
         _insert_xp_log(conn, "event", event_id, outcome, xp_amount)
+        perfect_day_bonus = _check_and_award_perfect_day(conn, today)
         level_after = compute_level(_get_xp_total_with_conn(conn))
 
         return {
@@ -487,6 +576,7 @@ def mark_event_done(event_id: int) -> dict:
             "updated": cur.rowcount,
             "outcome": outcome,
             "xp_awarded": xp_amount,
+            "perfect_day_bonus": perfect_day_bonus,
             "level_before": level_before,
             "level_after": level_after,
         }
@@ -993,6 +1083,11 @@ def complete_task(task_id: int) -> dict:
         if outcome in ("on_time", "grace"):
             xp_awarded, _ = _calculate_xp("task", outcome)
             _insert_xp_log(conn, "task", task_id, outcome, xp_awarded)
+
+        # Comprobar día perfecto SOLO si esta marca dio XP
+        perfect_day_bonus = 0
+        if xp_awarded > 0:
+            perfect_day_bonus = _check_and_award_perfect_day(conn, today)
         level_after = compute_level(_get_xp_total_with_conn(conn))
 
     return {
@@ -1000,6 +1095,7 @@ def complete_task(task_id: int) -> dict:
         "updated": cur.rowcount,
         "outcome": outcome,
         "xp_awarded": xp_awarded,
+        "perfect_day_bonus": perfect_day_bonus,
         "level_before": level_before,
         "level_after": level_after,
     }

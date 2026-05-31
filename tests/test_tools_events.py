@@ -1062,10 +1062,13 @@ def test_mark_event_done_routine_streak_cap(monkeypatch):
 def test_unmark_event_done_reverses_xp(monkeypatch):
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
     res = tools.add_event("Cita", "2026-05-30T10:00:00", "personal")
-    tools.mark_event_done(res["id"])
-    assert tools._get_xp_total() == 10
+    out = tools.mark_event_done(res["id"])
+    # El total incluye el bonus de día perfecto (+20) además de los 10 XP del evento
+    total_after_done = tools._get_xp_total()
+    assert total_after_done == out["xp_awarded"] + out["perfect_day_bonus"]
     tools.unmark_event_done(res["id"])
-    assert tools._get_xp_total() == 0
+    # unmark solo revierte el XP del evento; el bonus de día perfecto no se revierte
+    assert tools._get_xp_total() == out["perfect_day_bonus"]
 
 
 def test_uncomplete_routine_today_reverses_xp(monkeypatch):
@@ -1074,6 +1077,8 @@ def test_uncomplete_routine_today_reverses_xp(monkeypatch):
         "Meditar", "2026-05-30T08:00:00", "personal", recurring_rule="DAILY"
     )
     out = tools.mark_event_done(res["id"])
-    assert tools._get_xp_total() == out["xp_awarded"]
+    # El total incluye el bonus de día perfecto (+20) además del XP de la rutina
+    assert tools._get_xp_total() == out["xp_awarded"] + out["perfect_day_bonus"]
     tools.uncomplete_routine_today(res["id"])
-    assert tools._get_xp_total() == 0
+    # uncomplete solo revierte el XP de la rutina; el bonus de día perfecto queda
+    assert tools._get_xp_total() == out["perfect_day_bonus"]

@@ -164,11 +164,13 @@ def test_complete_task_inserts_xp_log(monkeypatch):
     res = tools.complete_task(t["id"])
     assert res["xp_awarded"] == 10
     assert res["level_before"] == 0
-    assert res["level_after"] == 0  # 10 XP < 30 → still level 0
+    # 10 XP tarea + 20 XP día perfecto = 30 XP → nivel 1
+    assert res["level_after"] == 1
+    assert res["perfect_day_bonus"] == 20
     with db.connect() as conn:
         row = conn.execute(
             "SELECT xp_amount, item_type, outcome FROM xp_log "
-            "WHERE item_id = ?",
+            "WHERE item_id = ? AND item_type = 'task'",
             (t["id"],),
         ).fetchone()
     assert row["xp_amount"] == 10
@@ -201,13 +203,17 @@ def test_complete_task_out_of_window_no_xp(monkeypatch):
 
 def test_complete_task_level_up(monkeypatch):
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
-    # 3 tareas on_time = 30 XP = nivel 1
-    for i in range(2):
-        t = tools.add_task(f"T{i}", due_date="2026-05-30")
-        tools.complete_task(t["id"])
-    # Al completar la tercera, sube a nivel 1
-    t = tools.add_task("T2", due_date="2026-05-30")
-    res = tools.complete_task(t["id"])
+    # Añadimos una tarea extra que quedará pendiente para que el día perfecto
+    # no se dispare hasta que se complete la última tarea.
+    # Completar T0 (+10) y T1 (+10): quedan 20 XP (sin día perfecto aún porque
+    # "bloqueador" sigue pendiente).
+    bloqueador = tools.add_task("Bloqueador", due_date="2026-05-30")
+    t0 = tools.add_task("T0", due_date="2026-05-30")
+    t1 = tools.add_task("T1", due_date="2026-05-30")
+    tools.complete_task(t0["id"])  # 10 XP, sin día perfecto (quedan t1 y bloqueador)
+    tools.complete_task(t1["id"])  # 20 XP, sin día perfecto (queda bloqueador)
+    # Al completar el bloqueador: 30 XP base + 20 día perfecto = 50 XP → nivel 1
+    res = tools.complete_task(bloqueador["id"])
     assert res["level_before"] == 0
     assert res["level_after"] == 1
 
@@ -215,10 +221,12 @@ def test_complete_task_level_up(monkeypatch):
 def test_uncomplete_task_reverses_xp(monkeypatch):
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
     t = tools.add_task("X", due_date="2026-05-30")
-    tools.complete_task(t["id"])
-    assert tools._get_xp_total() == 10
+    out = tools.complete_task(t["id"])
+    # 10 XP tarea + 20 día perfecto = 30 total
+    assert tools._get_xp_total() == out["xp_awarded"] + out["perfect_day_bonus"]
     tools.uncomplete_task(t["id"])
-    assert tools._get_xp_total() == 0
+    # uncomplete solo revierte el XP de la tarea; el bonus de día perfecto queda
+    assert tools._get_xp_total() == out["perfect_day_bonus"]
     with db.connect() as conn:
         reversals = conn.execute(
             "SELECT COUNT(*) FROM xp_log WHERE outcome = 'reversal'"
