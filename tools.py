@@ -126,6 +126,15 @@ def _get_xp_total() -> int:
     return row["total"] or 0
 
 
+def _get_xp_total_with_conn(conn) -> int:
+    """Versión de _get_xp_total que usa una conn existente (para
+    operaciones dentro de la misma transacción)."""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(xp_amount), 0) AS total FROM xp_log"
+    ).fetchone()
+    return row["total"] or 0
+
+
 # ---------------------------------------------------------------- events ----
 
 def add_event(
@@ -898,16 +907,46 @@ def complete_task(task_id: int) -> dict:
             "UPDATE tasks SET done = 1, done_at = ?, outcome = ? WHERE id = ?",
             (now_iso(), outcome, task_id),
         )
-    return {"id": task_id, "updated": cur.rowcount, "outcome": outcome}
+
+        # XP: solo si hay outcome (tareas flotantes no entran al juego)
+        xp_awarded = 0
+        level_before = compute_level(_get_xp_total_with_conn(conn))
+        if outcome in ("on_time", "grace"):
+            xp_awarded, _ = _calculate_xp("task", outcome)
+            _insert_xp_log(conn, "task", task_id, outcome, xp_awarded)
+        level_after = compute_level(_get_xp_total_with_conn(conn))
+
+    return {
+        "id": task_id,
+        "updated": cur.rowcount,
+        "outcome": outcome,
+        "xp_awarded": xp_awarded,
+        "level_before": level_before,
+        "level_after": level_after,
+    }
 
 
 def uncomplete_task(task_id: int) -> dict:
-    """Desmarca una tarea: done=0, done_at=NULL."""
+    """Desmarca una tarea: done=0, done_at=NULL, outcome=NULL.
+    Inserta una reversión en xp_log si había una ganancia previa."""
     with db.connect() as conn:
         cur = conn.execute(
-            "UPDATE tasks SET done = 0, done_at = NULL WHERE id = ?",
+            "UPDATE tasks SET done = 0, done_at = NULL, outcome = NULL "
+            "WHERE id = ?",
             (task_id,),
         )
+        # Buscar última fila xp_log para esta tarea no reversada
+        original = conn.execute(
+            "SELECT xp_amount FROM xp_log "
+            "WHERE item_type = 'task' AND item_id = ? AND outcome != 'reversal' "
+            "ORDER BY id DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        if original and original["xp_amount"] > 0:
+            _insert_xp_log(
+                conn, "task", task_id, "reversal",
+                xp_amount=-original["xp_amount"], streak_bonus=0,
+            )
     return {"id": task_id, "updated": cur.rowcount}
 
 

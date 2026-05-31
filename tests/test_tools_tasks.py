@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+import date_utils
 import db
 import tools
 
@@ -155,3 +156,71 @@ def test_complete_task_floating_leaves_outcome_null(monkeypatch):
         ).fetchone()
     assert row["done"] == 1
     assert row["outcome"] is None
+
+
+def test_complete_task_inserts_xp_log(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("A", due_date="2026-05-30")
+    res = tools.complete_task(t["id"])
+    assert res["xp_awarded"] == 10
+    assert res["level_before"] == 0
+    assert res["level_after"] == 0  # 10 XP < 30 → still level 0
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT xp_amount, item_type, outcome FROM xp_log "
+            "WHERE item_id = ?",
+            (t["id"],),
+        ).fetchone()
+    assert row["xp_amount"] == 10
+    assert row["item_type"] == "task"
+    assert row["outcome"] == "on_time"
+
+
+def test_complete_task_grace_inserts_five_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 31))
+    t = tools.add_task("B", due_date="2026-05-30")
+    res = tools.complete_task(t["id"])
+    assert res["xp_awarded"] == 5
+
+
+def test_complete_task_floating_no_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("Flotante")  # sin due_date
+    res = tools.complete_task(t["id"])
+    assert res["xp_awarded"] == 0
+    assert tools._get_xp_total() == 0
+
+
+def test_complete_task_out_of_window_no_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 6, 5))
+    t = tools.add_task("Tarde", due_date="2026-05-30")
+    res = tools.complete_task(t["id"])
+    assert res.get("error") == "out_of_window"
+    assert tools._get_xp_total() == 0
+
+
+def test_complete_task_level_up(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    # 3 tareas on_time = 30 XP = nivel 1
+    for i in range(2):
+        t = tools.add_task(f"T{i}", due_date="2026-05-30")
+        tools.complete_task(t["id"])
+    # Al completar la tercera, sube a nivel 1
+    t = tools.add_task("T2", due_date="2026-05-30")
+    res = tools.complete_task(t["id"])
+    assert res["level_before"] == 0
+    assert res["level_after"] == 1
+
+
+def test_uncomplete_task_reverses_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("X", due_date="2026-05-30")
+    tools.complete_task(t["id"])
+    assert tools._get_xp_total() == 10
+    tools.uncomplete_task(t["id"])
+    assert tools._get_xp_total() == 0
+    with db.connect() as conn:
+        reversals = conn.execute(
+            "SELECT COUNT(*) FROM xp_log WHERE outcome = 'reversal'"
+        ).fetchone()[0]
+    assert reversals == 1
