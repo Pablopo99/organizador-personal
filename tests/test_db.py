@@ -337,3 +337,28 @@ def test_missed_notifications_unique_task_one_per_item(fresh_db):
                 "INSERT INTO missed_notifications (item_type, item_id, notified_at) "
                 "VALUES ('task', 5, '2026-05-30T00:05:00')"
             )
+
+
+def test_xp_log_table_exists(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(xp_log)"
+        ).fetchall()]
+    assert "item_type" in cols
+    assert "item_id" in cols
+    assert "outcome" in cols
+    assert "xp_amount" in cols
+    assert "streak_bonus" in cols
+    assert "awarded_at" in cols
+
+
+def test_xp_log_default_item_id_is_zero(fresh_db):
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO xp_log (item_type, outcome, xp_amount, awarded_at) "
+            "VALUES ('perfect_day', 'bonus', 20, '2026-05-31T22:00:00')"
+        )
+        row = conn.execute(
+            "SELECT item_id FROM xp_log WHERE item_type='perfect_day'"
+        ).fetchone()
+    assert row["item_id"] == 0

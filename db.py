@@ -82,6 +82,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_missed_notif_routine
 CREATE UNIQUE INDEX IF NOT EXISTS idx_missed_notif_other
     ON missed_notifications(item_type, item_id)
     WHERE item_type != 'routine';
+
+CREATE TABLE IF NOT EXISTS xp_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_type     TEXT    NOT NULL,
+    item_id       INTEGER NOT NULL DEFAULT 0,
+    outcome       TEXT    NOT NULL,
+    xp_amount     INTEGER NOT NULL,
+    streak_bonus  INTEGER NOT NULL DEFAULT 0,
+    awarded_at    TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_xp_log_awarded_at
+    ON xp_log(awarded_at);
 """
 
 
@@ -166,6 +179,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
             CREATE UNIQUE INDEX idx_missed_notif_other
                 ON missed_notifications(item_type, item_id)
                 WHERE item_type != 'routine'
+        """)
+
+    if "xp_log" not in tables:
+        conn.execute("""
+            CREATE TABLE xp_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_type     TEXT    NOT NULL,
+                item_id       INTEGER NOT NULL DEFAULT 0,
+                outcome       TEXT    NOT NULL,
+                xp_amount     INTEGER NOT NULL,
+                streak_bonus  INTEGER NOT NULL DEFAULT 0,
+                awarded_at    TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_xp_log_awarded_at
+                ON xp_log(awarded_at)
         """)
 
 
