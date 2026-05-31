@@ -35,6 +35,67 @@ def _calculate_outcome(assigned: Optional[date], today: date) -> Optional[str]:
     return None
 
 
+# ----------------------------------------------------------------- xp ----
+
+_XP_BASE = {
+    "task":      {"on_time": 10, "grace":  5},
+    "event":     {"on_time": 10, "grace":  5},
+    "routine":   {"on_time":  5, "grace":  2},
+    "objective": {"on_time": 50, "grace": 25},
+}
+
+_STREAK_BONUS_CAP = 7
+
+
+def _calculate_xp(
+    item_type: str,
+    outcome: str,
+    streak_after: int = 0,
+) -> tuple[int, int]:
+    """Devuelve (xp_amount, streak_bonus_component).
+
+    Para rutinas, el bonus de racha = min(streak_after, 7).
+    Para otros tipos, bonus = 0.
+    """
+    base = _XP_BASE[item_type][outcome]
+    streak_bonus = 0
+    if item_type == "routine":
+        streak_bonus = min(max(streak_after, 0), _STREAK_BONUS_CAP)
+    return base + streak_bonus, streak_bonus
+
+
+def compute_level(xp_total: int) -> int:
+    """Devuelve el nivel actual para un total de XP.
+
+    Fórmula: XP_total_para_nivel_N = 10 * N * (N + 2).
+    Nivel 0 = < 30 XP.
+    """
+    if xp_total < 30:
+        return 0
+    n = 1
+    while 10 * (n + 1) * (n + 3) <= xp_total:
+        n += 1
+    return n
+
+
+_MEDAL_RANGES = [
+    (1, 5, "🥉"),
+    (6, 15, "🥈"),
+    (16, 30, "🥇"),
+    (31, 60, "💎"),
+]
+
+
+def medal_for_level(level: int) -> str:
+    """Devuelve el emoji de medalla para el nivel (vacío si nivel 0)."""
+    if level <= 0:
+        return ""
+    for lo, hi, medal in _MEDAL_RANGES:
+        if lo <= level <= hi:
+            return medal
+    return "👑"
+
+
 # ---------------------------------------------------------------- events ----
 
 def add_event(
