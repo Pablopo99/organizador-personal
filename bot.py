@@ -439,8 +439,12 @@ def _make_slash_handler(command: str):
 
 
 async def _set_bot_commands(application: Application) -> None:
-    """Registra el menú de comandos visible al escribir '/' en Telegram."""
-    await application.bot.set_my_commands([
+    """Registra el menú de comandos visible al escribir '/' en Telegram.
+
+    Se llama DESPUÉS de que la app esté arrancada (no en post_init) porque
+    ahí teníamos un fallo silencioso intermitente. Loguea éxito o fallo.
+    """
+    commands = [
         BotCommand("hoy", "Resumen de hoy"),
         BotCommand("manana", "Resumen de mañana"),
         BotCommand("semana", "Resumen de la semana"),
@@ -449,7 +453,15 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("rachas", "Mis rachas"),
         BotCommand("metricas", "Métricas de cumplimiento"),
         BotCommand("nueva", "Reiniciar conversación"),
-    ])
+    ]
+    try:
+        await application.bot.set_my_commands(commands)
+        log.info(
+            "Menú de comandos actualizado en Telegram (%d comandos)",
+            len(commands),
+        )
+    except Exception:
+        log.exception("Error registrando el menú de comandos en Telegram")
 
 
 async def _async_main() -> None:
@@ -465,7 +477,7 @@ async def _async_main() -> None:
     db.init_schema()
     log.info("Base de datos lista en %s", db.DB_PATH)
 
-    app = Application.builder().token(TELEGRAM_TOKEN).post_init(_set_bot_commands).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("hoy", _on_hoy))
     app.add_handler(CommandHandler("manana", _on_manana))
@@ -506,6 +518,9 @@ async def _async_main() -> None:
     await app.initialize()
     await app.start()
     await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Registrar el menú DESPUÉS de que el bot esté arrancado.
+    await _set_bot_commands(app)
 
     siri_app = siri_server.build_app(
         telegram_bot=app.bot,
