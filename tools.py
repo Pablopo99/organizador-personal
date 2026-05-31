@@ -96,6 +96,36 @@ def medal_for_level(level: int) -> str:
     return "👑"
 
 
+def _insert_xp_log(
+    conn,
+    item_type: str,
+    item_id: int,
+    outcome: str,
+    xp_amount: int,
+    streak_bonus: int = 0,
+) -> None:
+    """Inserta una fila en xp_log. Usar la misma `conn` que la operación
+    principal para que todo esté en la misma transacción."""
+    import date_utils
+    conn.execute(
+        """
+        INSERT INTO xp_log
+            (item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (item_type, item_id, outcome, xp_amount, streak_bonus, date_utils.now_iso()),
+    )
+
+
+def _get_xp_total() -> int:
+    """Suma todos los xp_amount registrados (incluye reversiones)."""
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(xp_amount), 0) AS total FROM xp_log"
+        ).fetchone()
+    return row["total"] or 0
+
+
 # ---------------------------------------------------------------- events ----
 
 def add_event(

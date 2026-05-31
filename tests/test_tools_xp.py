@@ -1,4 +1,10 @@
 """Tests de helpers puros del sistema XP/niveles."""
+import os
+import tempfile
+
+import pytest
+
+import db
 import tools
 
 
@@ -130,3 +136,51 @@ def test_medal_diamond():
 def test_medal_crown():
     for lv in (61, 100, 999):
         assert tools.medal_for_level(lv) == "👑"
+
+
+# _insert_xp_log / _get_xp_total — persistence helpers
+
+@pytest.fixture
+def temp_db(monkeypatch):
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    monkeypatch.setattr(db, "DB_PATH", path)
+    db.init_schema()
+    yield path
+    os.unlink(path)
+
+
+def test_get_xp_total_empty_db(temp_db):
+    assert tools._get_xp_total() == 0
+
+
+def test_insert_xp_log_and_get_total(temp_db):
+    with db.connect() as conn:
+        tools._insert_xp_log(
+            conn, "task", 1, "on_time",
+            xp_amount=10, streak_bonus=0,
+        )
+    assert tools._get_xp_total() == 10
+
+
+def test_insert_xp_log_negative_for_reversal(temp_db):
+    with db.connect() as conn:
+        tools._insert_xp_log(
+            conn, "task", 1, "on_time", xp_amount=10, streak_bonus=0,
+        )
+        tools._insert_xp_log(
+            conn, "task", 1, "reversal", xp_amount=-10, streak_bonus=0,
+        )
+    assert tools._get_xp_total() == 0
+
+
+def test_insert_xp_log_stores_streak_bonus(temp_db):
+    with db.connect() as conn:
+        tools._insert_xp_log(
+            conn, "routine", 1, "on_time",
+            xp_amount=12, streak_bonus=7,
+        )
+        row = conn.execute(
+            "SELECT streak_bonus FROM xp_log WHERE item_id = 1"
+        ).fetchone()
+    assert row["streak_bonus"] == 7
