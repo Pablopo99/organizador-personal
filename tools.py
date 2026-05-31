@@ -653,16 +653,27 @@ def routine_summary(date_from: str, date_to: str) -> list[dict]:
 
 
 def _count_scheduled_days(rule: str, base_datetime_iso: str, start: date, end: date) -> int:
-    """Cuántas instancias programadas tiene una rutina en [start, end]."""
+    """Cuántas instancias programadas tiene una rutina en [start, end].
+
+    Solo cuenta desde la fecha de inicio (`datetime` base) de la rutina:
+    si la rutina empezó después de `start`, recortamos el inicio.
+    """
+    try:
+        base_date = date.fromisoformat(base_datetime_iso[:10])
+    except (ValueError, TypeError):
+        base_date = start
+    effective_start = max(start, base_date)
+    if effective_start > end:
+        return 0
     if rule == "DAILY":
-        return (end - start).days + 1
+        return (end - effective_start).days + 1
     if rule.startswith("WEEKLY:"):
         weekday_code = rule.split(":", 1)[1]
         if weekday_code not in _WEEKDAY_MAP:
             return 0
         target = _WEEKDAY_MAP[weekday_code]
         count = 0
-        cur = start
+        cur = effective_start
         while cur <= end:
             if cur.weekday() == target:
                 count += 1

@@ -928,6 +928,18 @@ def test_mark_weekly_routine_done_in_wrong_day_rejected(monkeypatch):
     assert len(rows) == 0
 
 
+def test_routine_summary_scheduled_days_clamps_to_routine_start(monkeypatch):
+    """Una rutina creada a mitad del rango no cuenta días anteriores a su inicio."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event(
+        "Nueva rutina", "2026-05-28T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    summary = tools.routine_summary("2026-05-25", "2026-05-30")
+    target = next(r for r in summary if r["event_id"] == res["id"])
+    # Solo 3 días esperados: 28, 29, 30 (no 25-27 cuando la rutina no existía).
+    assert target["scheduled_days"] == 3
+
+
 def test_routine_summary_breaks_down_on_time_and_grace(monkeypatch):
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
     res = tools.add_event(
