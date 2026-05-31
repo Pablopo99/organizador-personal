@@ -115,3 +115,36 @@ def test_mark_objective_rejected_two_weeks_late(monkeypatch):
         ).fetchone()
     assert row["done"] == 0
     assert row["outcome"] is None
+
+
+def test_mark_objective_done_inserts_xp_on_time(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Meta", "2026-05-25")
+    out = tools.mark_objective_done(o["id"])
+    assert out["xp_awarded"] == 50
+    assert out["outcome"] == "on_time"
+
+
+def test_mark_objective_done_inserts_xp_grace(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Meta", "2026-05-18")
+    out = tools.mark_objective_done(o["id"])
+    assert out["xp_awarded"] == 25
+    assert out["outcome"] == "grace"
+
+
+def test_mark_objective_done_out_of_window_no_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Meta", "2026-05-11")
+    out = tools.mark_objective_done(o["id"])
+    assert out.get("error") == "out_of_window"
+    assert tools._get_xp_total() == 0
+
+
+def test_unmark_objective_done_reverses_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Meta", "2026-05-25")
+    tools.mark_objective_done(o["id"])
+    assert tools._get_xp_total() == 50
+    tools.unmark_objective_done(o["id"])
+    assert tools._get_xp_total() == 0

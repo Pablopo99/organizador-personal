@@ -892,19 +892,46 @@ def mark_objective_done(objective_id: int) -> dict:
         else:
             return {"id": objective_id, "updated": 0, "error": "out_of_window"}
 
+        level_before = compute_level(_get_xp_total_with_conn(conn))
+
         cur = conn.execute(
             "UPDATE objectives SET done = 1, outcome = ? WHERE id = ?",
             (outcome, objective_id),
         )
-    return {"id": objective_id, "updated": cur.rowcount, "outcome": outcome}
+
+        xp_amount, _ = _calculate_xp("objective", outcome)
+        _insert_xp_log(conn, "objective", objective_id, outcome, xp_amount)
+        level_after = compute_level(_get_xp_total_with_conn(conn))
+
+    return {
+        "id": objective_id,
+        "updated": cur.rowcount,
+        "outcome": outcome,
+        "xp_awarded": xp_amount,
+        "level_before": level_before,
+        "level_after": level_after,
+    }
 
 
 def unmark_objective_done(objective_id: int) -> dict:
-    """Desmarca un objetivo: done=0. Uso interno (callback de /semana)."""
+    """Desmarca un objetivo y revierte XP."""
     with db.connect() as conn:
         cur = conn.execute(
-            "UPDATE objectives SET done = 0 WHERE id = ?", (objective_id,)
+            "UPDATE objectives SET done = 0, outcome = NULL WHERE id = ?",
+            (objective_id,),
         )
+        original = conn.execute(
+            "SELECT xp_amount FROM xp_log "
+            "WHERE item_type = 'objective' AND item_id = ? "
+            "AND outcome != 'reversal' "
+            "ORDER BY id DESC LIMIT 1",
+            (objective_id,),
+        ).fetchone()
+        if original and original["xp_amount"] > 0:
+            _insert_xp_log(
+                conn, "objective", objective_id, "reversal",
+                xp_amount=-original["xp_amount"], streak_bonus=0,
+            )
     return {"id": objective_id, "updated": cur.rowcount}
 
 
