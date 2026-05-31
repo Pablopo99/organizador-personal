@@ -1000,3 +1000,80 @@ def test_query_events_include_grace_excludes_already_missed():
     )
     titles = [r["title"] for r in rows]
     assert "Cita descartada" not in titles
+
+
+def test_mark_event_done_puntual_inserts_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event("Cita", "2026-05-30T10:00:00", "personal")
+    out = tools.mark_event_done(res["id"])
+    assert out["xp_awarded"] == 10
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT xp_amount FROM xp_log WHERE item_type='event' AND item_id=?",
+            (res["id"],),
+        ).fetchone()
+    assert row["xp_amount"] == 10
+
+
+def test_mark_event_done_routine_with_streak_bonus(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event(
+        "Meditar", "2026-05-25T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    # Insertamos completions previas para construir racha
+    with db.connect() as conn:
+        for d in ["2026-05-25", "2026-05-26", "2026-05-27",
+                  "2026-05-28", "2026-05-29"]:
+            conn.execute(
+                "INSERT INTO routine_completions "
+                "(event_id, completion_date, created_at, status) "
+                "VALUES (?, ?, ?, 'on_time')",
+                (res["id"], d, "2026-05-30T08:00:00"),
+            )
+    # Hoy es día 6 de racha; tras marcar será día 6 -> bonus +6
+    out = tools.mark_event_done(res["id"])
+    # XP base 5 + bonus 6 = 11
+    assert out["xp_awarded"] == 11
+    assert out["streak_bonus"] == 6
+
+
+def test_mark_event_done_routine_streak_cap(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event(
+        "Meditar", "2026-05-20T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    with db.connect() as conn:
+        # 10 completions previas (20-29); hoy 30, lo que da racha 11.
+        for d in ["2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23",
+                  "2026-05-24", "2026-05-25", "2026-05-26", "2026-05-27",
+                  "2026-05-28", "2026-05-29"]:
+            conn.execute(
+                "INSERT INTO routine_completions "
+                "(event_id, completion_date, created_at, status) "
+                "VALUES (?, ?, ?, 'on_time')",
+                (res["id"], d, "2026-05-30T08:00:00"),
+            )
+    out = tools.mark_event_done(res["id"])
+    # 11 días seguidos = bonus capado en 7
+    assert out["streak_bonus"] == 7
+    assert out["xp_awarded"] == 12
+
+
+def test_unmark_event_done_reverses_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event("Cita", "2026-05-30T10:00:00", "personal")
+    tools.mark_event_done(res["id"])
+    assert tools._get_xp_total() == 10
+    tools.unmark_event_done(res["id"])
+    assert tools._get_xp_total() == 0
+
+
+def test_uncomplete_routine_today_reverses_xp(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    res = tools.add_event(
+        "Meditar", "2026-05-30T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    out = tools.mark_event_done(res["id"])
+    assert tools._get_xp_total() == out["xp_awarded"]
+    tools.uncomplete_routine_today(res["id"])
+    assert tools._get_xp_total() == 0

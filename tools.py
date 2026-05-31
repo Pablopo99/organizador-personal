@@ -386,15 +386,12 @@ def connect_calendar() -> dict:
 
 
 def mark_event_done(event_id: int) -> dict:
-    """Marca un evento como hecho.
+    """Marca un evento como hecho con XP.
 
-    Eventos puntuales -> done=1 + outcome (on_time | grace | rechazo).
-    Eventos recurrentes (rutinas) -> inserta routine_completions con
-    fecha de hoy + status='on_time'. La lógica de gracia para rutinas
-    se completa en una task posterior.
+    Eventos puntuales -> done=1 + outcome + xp.
+    Eventos recurrentes -> inserta routine_completions con status + xp.
     """
     import sqlite3
-
     import date_utils
 
     today = date_utils.today_madrid()
@@ -406,14 +403,15 @@ def mark_event_done(event_id: int) -> dict:
         if row is None:
             return {"id": event_id, "updated": 0, "error": "not_found"}
 
+        level_before = compute_level(_get_xp_total_with_conn(conn))
+
         if row["recurring_rule"]:
             rule = row["recurring_rule"]
             most_recent_expected = _most_recent_expected_date(rule, today)
             previous_expected = _previous_expected_date(rule, today)
 
-            target_date: Optional[date] = None
-            status: Optional[str] = None
-
+            target_date = None
+            status = None
             if most_recent_expected == today:
                 target_date = today
                 status = "on_time"
@@ -421,7 +419,6 @@ def mark_event_done(event_id: int) -> dict:
                 previous_expected is not None
                 and (today - previous_expected).days == 1
             ):
-                # Día de gracia: la fecha esperada anterior fue ayer.
                 target_date = previous_expected
                 status = "grace"
             else:
@@ -436,12 +433,6 @@ def mark_event_done(event_id: int) -> dict:
                     """,
                     (event_id, target_iso, date_utils.now_iso(), status),
                 )
-                return {
-                    "event_id": event_id,
-                    "completion_date": target_iso,
-                    "status": status,
-                    "updated": 1,
-                }
             except sqlite3.IntegrityError:
                 return {
                     "event_id": event_id,
@@ -449,6 +440,28 @@ def mark_event_done(event_id: int) -> dict:
                     "already_done": True,
                     "updated": 0,
                 }
+
+            # Calcular racha tras insertar (incluye la actual)
+            streak_after = _current_streak(event_id, rule, today, conn)
+            xp_amount, streak_bonus = _calculate_xp(
+                "routine", status, streak_after=streak_after
+            )
+            _insert_xp_log(
+                conn, "routine", event_id, status,
+                xp_amount=xp_amount, streak_bonus=streak_bonus,
+            )
+            level_after = compute_level(_get_xp_total_with_conn(conn))
+
+            return {
+                "event_id": event_id,
+                "completion_date": target_iso,
+                "status": status,
+                "updated": 1,
+                "xp_awarded": xp_amount,
+                "streak_bonus": streak_bonus,
+                "level_before": level_before,
+                "level_after": level_after,
+            }
 
         # Evento puntual
         try:
@@ -464,27 +477,66 @@ def mark_event_done(event_id: int) -> dict:
             "UPDATE events SET done = 1, outcome = ? WHERE id = ?",
             (outcome, event_id),
         )
-        return {"id": event_id, "updated": cur.rowcount, "outcome": outcome}
+
+        xp_amount, _ = _calculate_xp("event", outcome)
+        _insert_xp_log(conn, "event", event_id, outcome, xp_amount)
+        level_after = compute_level(_get_xp_total_with_conn(conn))
+
+        return {
+            "id": event_id,
+            "updated": cur.rowcount,
+            "outcome": outcome,
+            "xp_awarded": xp_amount,
+            "level_before": level_before,
+            "level_after": level_after,
+        }
 
 
 def unmark_event_done(event_id: int) -> dict:
-    """Quita el done=1 de un evento puntual (no-op para recurrentes)."""
+    """Quita el done=1 + outcome=NULL de un evento puntual. Revierte XP."""
     with db.connect() as conn:
         cur = conn.execute(
-            "UPDATE events SET done = 0 WHERE id = ?", (event_id,)
+            "UPDATE events SET done = 0, outcome = NULL WHERE id = ?",
+            (event_id,),
         )
+        original = conn.execute(
+            "SELECT xp_amount FROM xp_log "
+            "WHERE item_type = 'event' AND item_id = ? AND outcome != 'reversal' "
+            "ORDER BY id DESC LIMIT 1",
+            (event_id,),
+        ).fetchone()
+        if original and original["xp_amount"] > 0:
+            _insert_xp_log(
+                conn, "event", event_id, "reversal",
+                xp_amount=-original["xp_amount"], streak_bonus=0,
+            )
     return {"id": event_id, "updated": cur.rowcount}
 
 
 def uncomplete_routine_today(event_id: int) -> dict:
-    """Borra la completion de hoy (Madrid) para una rutina."""
+    """Borra la completion de hoy (Madrid) para una rutina y revierte XP."""
     import date_utils
     today = date_utils.today_madrid().isoformat()
     with db.connect() as conn:
         cur = conn.execute(
-            "DELETE FROM routine_completions WHERE event_id = ? AND completion_date = ?",
+            "DELETE FROM routine_completions "
+            "WHERE event_id = ? AND completion_date = ?",
             (event_id, today),
         )
+        if cur.rowcount > 0:
+            # Revertir el XP de la última fila xp_log de esta rutina
+            original = conn.execute(
+                "SELECT xp_amount FROM xp_log "
+                "WHERE item_type = 'routine' AND item_id = ? "
+                "AND outcome != 'reversal' "
+                "ORDER BY id DESC LIMIT 1",
+                (event_id,),
+            ).fetchone()
+            if original and original["xp_amount"] > 0:
+                _insert_xp_log(
+                    conn, "routine", event_id, "reversal",
+                    xp_amount=-original["xp_amount"], streak_bonus=0,
+                )
     return {"event_id": event_id, "completion_date": today, "deleted": cur.rowcount}
 
 
