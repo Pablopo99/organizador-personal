@@ -14,7 +14,7 @@ Pablo quiere poder decirle a Claude en lenguaje natural cuándo quiere ser avisa
 
 - Pablo puede añadir uno o varios recordatorios custom a un evento puntual al crearlo: "Tengo cita el viernes a las 5, avísame 30 min antes".
 - Pablo puede añadir recordatorios custom a un evento ya existente: "Avísame 30 min antes de la cita con María".
-- Los recordatorios custom **se suman** a los defaults (24h y 1h antes). No los reemplazan.
+- Si un evento tiene **cualquier** recordatorio custom, los dos defaults (24h y 1h antes) **no se mandan** para ese evento. Pablo toma el control total. Si no añade ningún custom, los defaults siguen funcionando como hoy.
 - Soporta múltiples recordatorios por evento.
 
 ## No-objetivos (fuera de alcance)
@@ -91,7 +91,22 @@ Permite a Claude resolver "tengo cita el viernes a las 5, avísame 30 min antes"
 
 ## `scheduler.check_reminders` — extensión
 
-Hoy el job corre cada 5 min y para cada evento próximo (<26h) revisa los dos flags fijos. Se añade un bloque equivalente para `event_reminders`:
+Hoy el job corre cada 5 min y para cada evento próximo (<26h) revisa los dos flags fijos. Se cambian dos cosas:
+
+**1. Filtrar defaults cuando el evento tenga customs.** La consulta que selecciona eventos próximos para los avisos por defecto (los del `reminder_1d_sent`/`reminder_1h_sent`) añade un guard:
+
+```sql
+WHERE done = 0
+  AND recurring_rule IS NULL
+  AND datetime >= ? AND datetime <= ?
+  AND NOT EXISTS (
+      SELECT 1 FROM event_reminders WHERE event_id = events.id
+  )
+```
+
+Si el evento tiene cualquier fila en `event_reminders`, los defaults se omiten silenciosamente (no se envía nada y los flags `reminder_*_sent` quedan como están — si Pablo borra el evento, no importa; si en el futuro hubiera una operación de "borrar todos los customs", los defaults volverían a activarse automáticamente porque el `NOT EXISTS` deja de cumplirse).
+
+**2. Añadir bloque para customs.** Se añade un bloque equivalente para `event_reminders`:
 
 ```python
 # Recordatorios custom pendientes cuyo momento está dentro de la ventana
@@ -175,6 +190,7 @@ Nuevos tests, todos en TDD:
 - `check_reminders` NO reenvía un recordatorio ya `sent=1`.
 - `check_reminders` ignora recordatorios de eventos `done=1`.
 - `check_reminders` ignora recordatorios fuera de la ventana.
+- **Defaults OFF cuando hay customs**: un evento con `event_reminders` no recibe ni el aviso 1d ni el 1h, aunque caigan dentro de la ventana. Y un evento SIN `event_reminders` sigue recibiendo defaults como siempre (regresión cubierta por tests existentes).
 
 **`tests/test_brain.py`**
 - `_pending_immediate_reminders` se rellena/consume correctamente (paralelo a `_pending_level_up`).
@@ -191,7 +207,7 @@ Nuevos tests, todos en TDD:
 ## Riesgos y consideraciones
 
 1. **Rate limit ya pegado**: Pablo está cerca del techo de Sonnet en Anthropic. Esta feature añade ~1 llamada de Claude por petición (no aumenta carga estructural). Más relevante: cuando suene un recordatorio el bot solo envía un mensaje de Telegram, no llama a Claude.
-2. **Ventana de ±5 min puede solapar con defaults**: si Pablo pide "avísame 1 hora antes", coincide casi exactamente con el default 1h. Resultado: dos mensajes muy parecidos. Aceptable — Pablo explícitamente quiso que custom se sumara a defaults. Si molesta, se puede dedupe en una iteración posterior.
+2. **Defaults desactivados cuando hay customs**: si Pablo añade un solo custom para un evento, pierde los defaults (1d + 1h) automáticamente. Esto es la conducta esperada y la confirmó él, pero el coste es que para recuperar los defaults tendría que borrar todos los customs (operación no soportada hoy). En la práctica el problema es marginal: si Pablo se equivoca, recrea el evento.
 3. **El job corre cada 5 min**: precisión de los avisos es ±5 min, no exacta. Es el mismo comportamiento que hoy.
 4. **Si Fly reinicia justo en la ventana de un recordatorio**, podría perderse igual que ahora (no es regresión, pero merece flag).
 
