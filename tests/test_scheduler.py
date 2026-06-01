@@ -304,3 +304,82 @@ async def test_check_reminders_skips_defaults_when_event_has_customs(monkeypatch
     assert row["reminder_1h_sent"] == 0
 
 
+@pytest.mark.asyncio
+async def test_check_reminders_sends_custom_within_window(monkeypatch):
+    """Un custom cuyo fire_time cae dentro de la ventana ±5 min se manda
+    y se marca sent=1."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    # Evento dentro de 35 min; custom 30 min antes → fire_time = en 5 min,
+    # dentro de la ventana ±5 min.
+    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    ev = tools.add_event("Dentista", when.isoformat(), "personal")
+    tools.add_event_reminder(ev["id"], 30)
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    send_mock.assert_called_once()
+    text = send_mock.call_args.kwargs["text"]
+    assert "Dentista" in text
+    assert "30 min" in text
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT sent FROM event_reminders WHERE event_id = ?",
+            (ev["id"],),
+        ).fetchone()
+    assert row["sent"] == 1
+
+
+@pytest.mark.asyncio
+async def test_check_reminders_does_not_resend_sent_custom(monkeypatch):
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    ev = tools.add_event("Dentista", when.isoformat(), "personal")
+    tools.add_event_reminder(ev["id"], 30)
+    # Forzar sent=1
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE event_reminders SET sent = 1 WHERE event_id = ?",
+            (ev["id"],),
+        )
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    assert send_mock.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_check_reminders_ignores_custom_outside_window(monkeypatch):
+    """Custom cuyo fire_time está fuera de la ventana ±5 min no se manda."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    # Evento dentro de 24h; custom 30 min antes → fire_time aún lejos
+    when = (datetime.now() + timedelta(hours=24)).replace(microsecond=0)
+    ev = tools.add_event("Cita", when.isoformat(), "personal")
+    tools.add_event_reminder(ev["id"], 30)
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    assert send_mock.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_check_reminders_ignores_custom_for_done_event(monkeypatch):
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    ev = tools.add_event("Cita", when.isoformat(), "personal")
+    tools.add_event_reminder(ev["id"], 30)
+    with db.connect() as conn:
+        conn.execute("UPDATE events SET done = 1 WHERE id = ?", (ev["id"],))
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    assert send_mock.call_count == 0
+
+

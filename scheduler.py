@@ -131,6 +131,27 @@ _HOUR_REMINDER_MIN_MIN = 50.0
 _HOUR_REMINDER_MAX_MIN = 70.0
 
 
+def _format_offset(minutes: int) -> str:
+    """Formatea un offset en minutos a una cadena legible en español.
+
+    < 60 → "30 min", 60 → "1 h", 60-1439 → "X h", 1440 → "1 día",
+    múltiplos de 1440 → "N días", 10080 → "1 semana", resto → "N días".
+    """
+    if minutes < 60:
+        return f"{minutes} min"
+    if minutes == 60:
+        return "1 h"
+    if minutes < 1440:
+        hours = minutes // 60
+        return f"{hours} h"
+    if minutes == 1440:
+        return "1 día"
+    if minutes == 10080:
+        return "1 semana"
+    days = minutes // 1440
+    return f"{days} días"
+
+
 async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cada 5 min: revisa eventos próximos y manda recordatorios pendientes."""
     now = datetime.now()
@@ -174,6 +195,52 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 and row["reminder_1h_sent"] == 0):
             text = f"⏰ En 1h tienes: <b>{row['title']}</b>"
             await _safe_send_and_mark(context, text, row["id"], "reminder_1h_sent")
+
+    # Recordatorios custom dentro de la ventana ±5 min
+    with db.connect() as conn:
+        custom_rows = conn.execute(
+            """
+            SELECT er.id AS reminder_id, er.event_id, er.offset_minutes,
+                   e.title, e.datetime
+            FROM event_reminders er
+            JOIN events e ON e.id = er.event_id
+            WHERE er.sent = 0
+              AND e.done = 0
+              AND e.recurring_rule IS NULL
+            """
+        ).fetchall()
+
+    for r in custom_rows:
+        try:
+            event_dt = datetime.fromisoformat(r["datetime"])
+        except ValueError:
+            log.warning(
+                "Evento %s con datetime inválido: %r",
+                r["event_id"], r["datetime"],
+            )
+            continue
+        fire_time = event_dt - timedelta(minutes=r["offset_minutes"])
+        diff_sec = abs((fire_time - now).total_seconds())
+        if diff_sec <= 5 * 60:
+            pretty = _format_offset(r["offset_minutes"])
+            text = f"⏰ En {pretty} tienes: <b>{r['title']}</b>"
+            try:
+                await context.bot.send_message(
+                    chat_id=ALLOWED_USER_ID,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                log.exception(
+                    "Error enviando recordatorio custom %s",
+                    r["reminder_id"],
+                )
+                continue
+            with db.connect() as conn:
+                conn.execute(
+                    "UPDATE event_reminders SET sent = 1 WHERE id = ?",
+                    (r["reminder_id"],),
+                )
 
 
 async def _safe_send_and_mark(context, text: str, event_id: int, flag_column: str) -> None:
