@@ -1403,6 +1403,28 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "add_event_reminder",
+        "description": (
+            "Añade un recordatorio personalizado a un evento puntual existente. "
+            "minutes_before es la antelación en minutos (30 = 30 min antes, "
+            "60 = 1h antes, 1440 = 1 día antes, 10080 = 1 semana antes). "
+            "Si el evento ya tiene cualquier recordatorio custom, los avisos "
+            "por defecto (1d y 1h antes) NO se mandarán para ese evento. "
+            "No usar en eventos recurrentes/rutinas."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "integer"},
+                "minutes_before": {
+                    "type": "integer",
+                    "description": "Minutos antes del evento. Debe ser > 0.",
+                },
+            },
+            "required": ["event_id", "minutes_before"],
+        },
+    },
+    {
         "name": "routine_summary",
         "description": (
             "Resumen agregado de rutinas (eventos recurrentes) para un rango de "
@@ -1540,6 +1562,7 @@ _DISPATCH = {
     "update_event": update_event,
     "delete_event": delete_event,
     "mark_event_done": mark_event_done,
+    "add_event_reminder": add_event_reminder,
     "routine_summary": routine_summary,
     "add_objective": add_objective,
     "query_objectives": query_objectives,
