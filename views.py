@@ -300,17 +300,28 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
         if monday <= done_date <= sunday:
             task_done_week.append(t)
 
-    weekdays_es = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    weekdays_es_full = [
+        "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo",
+    ]
 
     sections: list[str] = []
 
     if week_pending:
-        lines = []
+        by_day: dict[int, list[dict]] = {}
         for e in week_pending:
             dt = datetime.fromisoformat(e["datetime"])
-            wd = weekdays_es[dt.weekday()]
-            lines.append(f"• {wd} {dt.strftime('%H:%M')} — {e['title']}")
-        sections.append("📅 <b>ESTA SEMANA</b>\n" + "\n".join(lines))
+            by_day.setdefault(dt.weekday(), []).append({"dt": dt, "title": e["title"]})
+
+        chunks: list[str] = []
+        for wd in sorted(by_day):
+            day_items = sorted(by_day[wd], key=lambda x: x["dt"])
+            day_lines = [
+                f"• {item['dt'].strftime('%H:%M')} — {item['title']}"
+                for item in day_items
+            ]
+            chunks.append(f"<b>{weekdays_es_full[wd]}</b>\n" + "\n".join(day_lines))
+
+        sections.append("📅 <b>ESTA SEMANA</b>\n\n" + "\n\n".join(chunks))
 
     pending_objectives = [o for o in objectives if not o["done"] and o.get("outcome") != "missed"]
     done_objectives = [o for o in objectives if o["done"] and o.get("outcome") != "missed"]

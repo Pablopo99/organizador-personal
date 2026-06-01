@@ -225,6 +225,36 @@ def test_render_week_view_empty_returns_semana_tranquila():
     assert keyboard is None
 
 
+def test_render_week_view_groups_events_by_weekday():
+    """ESTA SEMANA agrupa los eventos por día (Martes, Miércoles, ...)
+    con nombre completo en negrita, omitiendo días sin eventos."""
+    # Martes 19, Martes 19 (otro), Jueves 21. Miércoles queda vacío.
+    tools.add_event("Reunión cliente", "2026-05-19T10:00:00", "work")
+    tools.add_event("Dentista", "2026-05-19T16:30:00", "personal")
+    tools.add_event("Cena María", "2026-05-21T20:00:00", "personal")
+
+    text, _ = _render_week(today=date(2026, 5, 18))
+
+    # Encabezados por día (nombre completo)
+    assert "<b>Martes</b>" in text
+    assert "<b>Jueves</b>" in text
+    # Días vacíos NO aparecen
+    assert "<b>Miércoles</b>" not in text
+    assert "<b>Lunes</b>" not in text
+
+    # Los eventos del martes salen DEBAJO de "Martes" y antes de "Jueves"
+    martes_idx = text.index("<b>Martes</b>")
+    jueves_idx = text.index("<b>Jueves</b>")
+    martes_block = text[martes_idx:jueves_idx]
+    assert "10:00 — Reunión cliente" in martes_block
+    assert "16:30 — Dentista" in martes_block
+    # Y el del jueves bajo "Jueves"
+    assert "20:00 — Cena María" in text[jueves_idx:]
+    # Ya no hay prefijo de día corto en las líneas
+    assert "• Mar " not in text
+    assert "• Jue " not in text
+
+
 def test_render_week_view_only_objective_has_button():
     tools.add_event("Reunión Marta", "2026-05-19T10:00:00", "work")
     o = tools.add_objective("Terminar pres Spotify", "2026-05-18")
