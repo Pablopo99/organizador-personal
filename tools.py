@@ -626,6 +626,60 @@ def mark_event_done(event_id: int) -> dict:
         }
 
 
+def add_event_reminder(event_id: int, minutes_before: int) -> dict:
+    """Añade un recordatorio custom al evento.
+
+    Reglas:
+    - Solo eventos puntuales (no recurrentes) y no marcados como hechos.
+    - minutes_before debe ser > 0.
+    - Si el momento del aviso ya pasó (event.datetime - now < minutes_before),
+      la fila se inserta con sent=1 y se devuelve fires_immediately=True
+      para que el bot lo entregue inmediatamente.
+    """
+    import date_utils
+    if minutes_before <= 0:
+        return {"error": "invalid_offset"}
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT id, datetime, recurring_rule, done FROM events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            return {"error": "not_found"}
+        if row["recurring_rule"]:
+            return {"error": "event_is_recurring"}
+        if row["done"] == 1:
+            return {"error": "event_already_done"}
+
+        try:
+            event_dt = datetime.fromisoformat(row["datetime"])
+        except ValueError:
+            return {"error": "bad_datetime"}
+
+        now = datetime.fromisoformat(date_utils.now_iso())
+        fire_time = event_dt - timedelta(minutes=minutes_before)
+        fires_immediately = fire_time <= now
+
+        conn.execute(
+            "INSERT INTO event_reminders "
+            "(event_id, offset_minutes, sent, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                event_id,
+                minutes_before,
+                1 if fires_immediately else 0,
+                date_utils.now_iso(),
+            ),
+        )
+
+    return {
+        "event_id": event_id,
+        "offset_minutes": minutes_before,
+        "fires_immediately": fires_immediately,
+    }
+
+
 def unmark_event_done(event_id: int) -> dict:
     """Quita el done=1 + outcome=NULL de un evento puntual. Revierte XP."""
     with db.connect() as conn:
