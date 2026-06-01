@@ -657,6 +657,18 @@ def add_event_reminder(event_id: int, minutes_before: int) -> dict:
         except ValueError:
             return {"error": "bad_datetime"}
 
+        existing = conn.execute(
+            "SELECT id FROM event_reminders "
+            "WHERE event_id = ? AND offset_minutes = ?",
+            (event_id, minutes_before),
+        ).fetchone()
+        if existing:
+            return {
+                "event_id": event_id,
+                "offset_minutes": minutes_before,
+                "already_exists": True,
+            }
+
         now = datetime.fromisoformat(date_utils.now_iso())
         fire_time = event_dt - timedelta(minutes=minutes_before)
         fires_immediately = fire_time <= now

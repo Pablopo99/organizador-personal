@@ -78,3 +78,46 @@ def test_add_event_reminder_future_inserts_pending():
         ).fetchone()
     assert row["sent"] == 0
     assert row["offset_minutes"] == 30
+
+
+def test_add_event_reminder_past_window_fires_immediately():
+    """Evento dentro de 10 min, offset 30 min → fire_time ya pasó →
+    sent=1 y fires_immediately=True."""
+    ev = _seed_future_event(offset_hours=0.16)  # ~10 min en el futuro
+    res = tools.add_event_reminder(ev["id"], 30)
+    assert res["fires_immediately"] is True
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT sent FROM event_reminders WHERE event_id = ?",
+            (ev["id"],),
+        ).fetchone()
+    assert row["sent"] == 1
+
+
+def test_add_event_reminder_idempotent_same_offset():
+    """Llamar dos veces con (event_id, offset) iguales no duplica."""
+    ev = _seed_future_event(offset_hours=24)
+    r1 = tools.add_event_reminder(ev["id"], 30)
+    assert "already_exists" not in r1
+    r2 = tools.add_event_reminder(ev["id"], 30)
+    assert r2.get("already_exists") is True
+    with db.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM event_reminders WHERE event_id = ?",
+            (ev["id"],),
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_add_event_reminder_different_offsets_coexist():
+    """Dos offsets distintos en el mismo evento son dos filas independientes."""
+    ev = _seed_future_event(offset_hours=24)
+    tools.add_event_reminder(ev["id"], 30)
+    tools.add_event_reminder(ev["id"], 180)
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT offset_minutes FROM event_reminders "
+            "WHERE event_id = ? ORDER BY offset_minutes",
+            (ev["id"],),
+        ).fetchall()
+    assert [r["offset_minutes"] for r in rows] == [30, 180]
