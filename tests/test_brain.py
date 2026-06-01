@@ -199,3 +199,20 @@ def test_record_and_pop_level_up():
     assert res == (4, 5)
     # Segunda llamada → None
     assert brain.pop_level_up(42) is None
+
+
+def test_record_and_pop_immediate_reminders():
+    import brain
+    brain.record_immediate_reminder(42, event_id=7, offset_minutes=30, title="Cita")
+    brain.record_immediate_reminder(42, event_id=9, offset_minutes=60, title="Médico")
+    res = brain.pop_immediate_reminders(42)
+    assert len(res) == 2
+    titles = {r["title"] for r in res}
+    assert titles == {"Cita", "Médico"}
+    # Segunda llamada → lista vacía
+    assert brain.pop_immediate_reminders(42) == []
+
+
+def test_pop_immediate_reminders_unknown_user_returns_empty():
+    import brain
+    assert brain.pop_immediate_reminders(99999) == []

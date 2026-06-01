@@ -4,6 +4,7 @@ from datetime import datetime
 
 import anthropic
 
+import db
 import tools
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TIMEZONE
 
@@ -34,6 +35,26 @@ def record_level_up(user_id: int, level_before: int, level_after: int) -> None:
 
 def pop_level_up(user_id: int):
     return _pending_level_up.pop(user_id, None)
+
+
+# Recordatorios custom que deben enviarse inmediatamente (offset ya pasado
+# al añadirlos). Se rellenan cuando una tool devuelve fires_immediately=True
+# y se consumen en bot.py tras enviar la respuesta normal de Claude.
+_pending_immediate_reminders: dict[int, list[dict]] = {}
+
+
+def record_immediate_reminder(
+    user_id: int, event_id: int, offset_minutes: int, title: str
+) -> None:
+    _pending_immediate_reminders.setdefault(user_id, []).append({
+        "event_id": event_id,
+        "offset_minutes": offset_minutes,
+        "title": title,
+    })
+
+
+def pop_immediate_reminders(user_id: int) -> list[dict]:
+    return _pending_immediate_reminders.pop(user_id, [])
 
 
 def record_pending_calendar_button(user_id: int, event_id: int) -> None:
@@ -209,6 +230,51 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
                             lb is not None and la is not None and la > lb
                         ):
                             record_level_up(user_id, lb, la)
+                    if isinstance(result, dict):
+                        # Caso 1: add_event_reminder con fires_immediately=True
+                        if (
+                            result.get("fires_immediately")
+                            and result.get("event_id")
+                            and result.get("offset_minutes")
+                        ):
+                            with db.connect() as _c:
+                                _r = _c.execute(
+                                    "SELECT title FROM events WHERE id = ?",
+                                    (result["event_id"],),
+                                ).fetchone()
+                            if _r:
+                                record_immediate_reminder(
+                                    user_id,
+                                    event_id=result["event_id"],
+                                    offset_minutes=result["offset_minutes"],
+                                    title=_r["title"],
+                                )
+                        # Caso 2: add_event con reminders_added inserto alguno con sent=1.
+                        # add_event no marca fires_immediately en su retorno
+                        # principal porque procesa una lista; leemos event_reminders
+                        # cuya sent=1 recién insertada para este event_id.
+                        if (
+                            block.name == "add_event"
+                            and result.get("reminders_added")
+                        ):
+                            with db.connect() as _c:
+                                _ev = _c.execute(
+                                    "SELECT title FROM events WHERE id = ?",
+                                    (result["id"],),
+                                ).fetchone()
+                                _rows = _c.execute(
+                                    "SELECT offset_minutes FROM event_reminders "
+                                    "WHERE event_id = ? AND sent = 1",
+                                    (result["id"],),
+                                ).fetchall()
+                            if _ev:
+                                for _row in _rows:
+                                    record_immediate_reminder(
+                                        user_id,
+                                        event_id=result["id"],
+                                        offset_minutes=_row["offset_minutes"],
+                                        title=_ev["title"],
+                                    )
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
