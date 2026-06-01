@@ -583,3 +583,43 @@ async def test_on_nivel_unauthorized_ignored(monkeypatch):
     await bot._on_nivel(update, MagicMock())
 
     reply_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_callback_marks_task_and_sends_level_up(monkeypatch, temp_db_for_bot):
+    """Cuando una acción sube de nivel, se manda mensaje aparte."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+
+    import db
+    import tools
+    # Preparar: 20 XP previos
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO xp_log "
+            "(item_type, item_id, outcome, xp_amount, awarded_at) "
+            "VALUES ('task', 999, 'on_time', 20, '2026-05-19T10:00:00')"
+        )
+    # Crear tarea de hoy
+    t = tools.add_task("Hoy", due_date="2026-05-19")
+
+    query = MagicMock()
+    query.from_user.id = 42
+    query.data = f"mT:{t['id']}:P"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock()
+    update = MagicMock()
+    update.callback_query = query
+    ctx = MagicMock()
+    ctx.bot = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    await bot._on_callback_query(update, ctx)
+
+    # XP total ahora 30 = nivel 1. Antes 20 = nivel 0. Debió mandar level-up.
+    ctx.bot.send_message.assert_called()
+    sent_text = ctx.bot.send_message.call_args.kwargs["text"]
+    assert "Nivel 1" in sent_text

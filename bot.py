@@ -307,6 +307,23 @@ async def _on_nivel(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _render_level_up_message(level_before: int, level_after: int) -> str:
+    """Devuelve el texto HTML del mensaje de subida de nivel.
+
+    Incluye transición de medalla si hay cambio de tramo.
+    """
+    medal_before = tools.medal_for_level(level_before)
+    medal_after = tools.medal_for_level(level_after)
+    if medal_before != medal_after and medal_after:
+        transition = f" {medal_before or '⬜'} → {medal_after}"
+    else:
+        transition = f" {medal_after}" if medal_after else ""
+    return (
+        f"🎉 ¡Nivel {level_after} desbloqueado!{transition}\n"
+        f"¡Sigue así!"
+    )
+
+
 _CALLBACK_ACTIONS = {
     "mE": lambda i: tools.mark_event_done(i),
     "uE": lambda i: tools.unmark_event_done(i),
@@ -370,9 +387,27 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     try:
-        handler(item_id)
+        result = handler(item_id)
     except Exception:
         log.exception("Error aplicando mutación de callback %s", data)
+        result = None
+
+    if isinstance(result, dict):
+        level_before = result.get("level_before")
+        level_after = result.get("level_after")
+        if (
+            level_before is not None
+            and level_after is not None
+            and level_after > level_before
+        ):
+            try:
+                await context.bot.send_message(
+                    chat_id=ALLOWED_USER_ID,
+                    text=_render_level_up_message(level_before, level_after),
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                log.exception("Error enviando mensaje de subida de nivel")
 
     if action_type == "gc":
         try:
