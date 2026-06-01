@@ -184,3 +184,24 @@ def test_insert_xp_log_stores_streak_bonus(temp_db):
             "SELECT streak_bonus FROM xp_log WHERE item_id = 1"
         ).fetchone()
     assert row["streak_bonus"] == 7
+
+
+def test_e2e_completar_y_subir_nivel(monkeypatch, temp_db):
+    """Smoke: marcar varias acciones acumula XP correctamente."""
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    # Tarea bloqueadora que queda pendiente para que no se otorgue día perfecto
+    tools.add_task("bloqueador", due_date="2026-05-30")
+    # 3 tareas on_time = 30 XP = nivel 1
+    for i in range(3):
+        t = tools.add_task(f"T{i}", due_date="2026-05-30")
+        tools.complete_task(t["id"])
+    assert tools._get_xp_total() == 30
+    assert tools.compute_level(tools._get_xp_total()) == 1
+    # 1 objetivo on_time = +50 XP = 80 = nivel 2
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("O", "2026-05-25")
+    tools.mark_objective_done(o["id"])
+    assert tools._get_xp_total() == 80
+    assert tools.compute_level(tools._get_xp_total()) == 2
