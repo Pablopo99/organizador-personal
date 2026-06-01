@@ -164,6 +164,22 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except Exception:
             log.exception("Error enviando mensaje de subida de nivel post-brain")
 
+    # Recordatorios custom inmediatos disparados por la respuesta de Claude
+    for rem in brain.pop_immediate_reminders(user_id):
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=_render_reminder_message(
+                    rem["offset_minutes"], rem["title"]
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception(
+                "Error enviando recordatorio inmediato del evento %s",
+                rem["event_id"],
+            )
+
 
 async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.voice:
@@ -217,6 +233,22 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             log.exception("Error enviando mensaje de subida de nivel post-brain (voz)")
+
+    # Recordatorios custom inmediatos disparados por la respuesta de Claude
+    for rem in brain.pop_immediate_reminders(from_user_id):
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=_render_reminder_message(
+                    rem["offset_minutes"], rem["title"]
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception(
+                "Error enviando recordatorio inmediato del evento %s",
+                rem["event_id"],
+            )
 
 
 async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -348,6 +380,13 @@ def _render_level_up_message(level_before: int, level_after: int) -> str:
         f"🎉 ¡Nivel {level_after} desbloqueado!{transition}\n"
         f"¡Sigue así!"
     )
+
+
+def _render_reminder_message(offset_minutes: int, title: str) -> str:
+    """Texto HTML del recordatorio inmediato (mismo formato que el scheduler)."""
+    from scheduler import _format_offset
+    pretty = _format_offset(offset_minutes)
+    return f"⏰ En {pretty} tienes: <b>{title}</b>"
 
 
 _CALLBACK_ACTIONS = {

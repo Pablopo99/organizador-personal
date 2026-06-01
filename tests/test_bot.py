@@ -647,3 +647,32 @@ async def test_brain_level_up_triggers_message(monkeypatch):
 
     ctx.bot.send_message.assert_called_once()
     assert "Nivel 1" in ctx.bot.send_message.call_args.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_sends_immediate_reminders(monkeypatch):
+    """Si brain registró inmediatos, _on_message los manda aparte tras la
+    respuesta normal."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    import brain
+    brain.record_immediate_reminder(
+        42, event_id=1, offset_minutes=30, title="Dentista"
+    )
+
+    update = MagicMock()
+    update.message.text = "hola"
+    update.message.reply_text = AsyncMock()
+    update.effective_user.id = 42
+
+    ctx = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    monkeypatch.setattr(
+        bot, "process_incoming", lambda text, from_user_id: "ok"
+    )
+
+    await bot._on_message(update, ctx)
+
+    sends = [c.kwargs["text"] for c in ctx.bot.send_message.call_args_list]
+    matches = [t for t in sends if "Dentista" in t and "30 min" in t]
+    assert len(matches) == 1
