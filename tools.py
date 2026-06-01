@@ -211,12 +211,14 @@ def _check_and_award_perfect_day(conn, today: date) -> int:
     if total_today == 0:
         return 0
 
-    # Otorgar
+    # Otorgar. Usar today (Madrid) en vez de now_iso() para que la idempotencia
+    # sobreviva a tests que solo patchean today_madrid (now_iso no es parcheable
+    # vía date_utils porque tools lo importa por nombre en otros sitios).
     conn.execute(
         "INSERT INTO xp_log "
         "(item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at) "
         "VALUES ('perfect_day', 0, 'bonus', 20, 0, ?)",
-        (date_utils.now_iso(),),
+        (today.isoformat() + "T00:00:00",),
     )
     return 20
 

@@ -205,3 +205,36 @@ def test_e2e_completar_y_subir_nivel(monkeypatch, temp_db):
     tools.mark_objective_done(o["id"])
     assert tools._get_xp_total() == 80
     assert tools.compute_level(tools._get_xp_total()) == 2
+
+
+def test_uncomplete_recomplete_uncomplete_no_xp_leak(monkeypatch, temp_db):
+    """Una tarea marcada → desmarcada → re-marcada → desmarcada otra vez
+    debe acabar con XP = 0 (cada complete inserta +10; cada uncomplete -10)."""
+    from datetime import date
+    import date_utils
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    # Tarea bloqueadora para evitar día perfecto
+    tools.add_task("bloqueador", due_date="2026-05-30")
+    t = tools.add_task("ciclo", due_date="2026-05-30")
+
+    tools.complete_task(t["id"])
+    assert tools._get_xp_total() == 10
+    tools.uncomplete_task(t["id"])
+    assert tools._get_xp_total() == 0
+    tools.complete_task(t["id"])
+    assert tools._get_xp_total() == 10
+    tools.uncomplete_task(t["id"])
+    assert tools._get_xp_total() == 0
+
+    # Sanidad: dos ganancias y dos reversiones, nada más
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT outcome, xp_amount FROM xp_log "
+            "WHERE item_type = 'task' AND item_id = ? "
+            "ORDER BY id",
+            (t["id"],),
+        ).fetchall()
+    assert [r["xp_amount"] for r in rows] == [10, -10, 10, -10]
+    assert [r["outcome"] for r in rows] == [
+        "on_time", "reversal", "on_time", "reversal"
+    ]

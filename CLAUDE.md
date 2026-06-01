@@ -65,6 +65,7 @@ Telegram ─► bot.py ─► brain.py ─► tools.py ─► db.py ─► SQLit
 - `tasks(id, text, done, created_at, done_at)` — no date.
 - `objectives(id, text, week_start, done, created_at)` — `week_start` always normalized to Monday.
 - `routine_completions(id, event_id, completion_date, created_at)` — UNIQUE(event_id, completion_date), FK to `events.id` ON DELETE CASCADE. Records that a recurring event was done on a specific date. Powers RUTINAS section, streaks and per-instance "done today" rendering.
+- `xp_log(id, item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at)` — append-only ledger del sistema de niveles/XP. Cada acción que da XP (tarea/evento/rutina/objetivo on_time o grace, día perfecto, semana perfecta) inserta una fila positiva. Las reversiones (`uncomplete_*`, `unmark_*`) insertan una fila negativa con `outcome='reversal'`. `compute_level(SUM(xp_amount))` da el nivel actual. NO tiene FK a events/tasks/objectives a propósito (conserva historial aunque el item original se borre).
 
 ## Workflow conventions
 
