@@ -11,11 +11,24 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import tools
 
 
+def _render_level_header(conn) -> str:
+    """Devuelve la línea de cabecera del nivel actual con doble salto."""
+    total = conn.execute(
+        "SELECT COALESCE(SUM(xp_amount), 0) AS t FROM xp_log"
+    ).fetchone()["t"] or 0
+    level = tools.compute_level(total)
+    if level == 0:
+        return "<b>Nivel 0</b>\n\n"
+    medal = tools.medal_for_level(level)
+    return f"{medal} <b>Nivel {level}</b>\n\n"
+
+
 def render_today_view(
     today: date, conn, show_completed: bool = False
 ) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     from datetime import timedelta
 
+    header = _render_level_header(conn)
     today_iso = today.isoformat()
     yesterday = today - timedelta(days=1)
     yesterday_iso = yesterday.isoformat()
@@ -110,9 +123,9 @@ def render_today_view(
         sections.append("✅ <b>COMPLETADO HOY</b>\n" + "\n".join(lines))
 
     if not sections:
-        return "Día libre, disfrútalo 💪", None
+        return header + "Día libre, disfrútalo 💪", None
 
-    text = "\n\n".join(sections)
+    text = header + "\n\n".join(sections)
 
     buttons: list[list[InlineKeyboardButton]] = []
     for e in grace_pending:
@@ -166,6 +179,7 @@ def render_today_view(
 
 def render_tomorrow_view(tomorrow: date, conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     """Vista de /mañana: eventos y rutinas que tocan mañana. Solo lectura."""
+    header = _render_level_header(conn)
     day_start = f"{tomorrow.isoformat()}T00:00:00"
     day_end = f"{tomorrow.isoformat()}T23:59:59"
 
@@ -194,9 +208,9 @@ def render_tomorrow_view(tomorrow: date, conn) -> tuple[str, Optional[InlineKeyb
         sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
 
     if not sections:
-        return "Mañana lo tienes libre 🌞", None
+        return header + "Mañana lo tienes libre 🌞", None
 
-    return "\n\n".join(sections), None
+    return header + "\n\n".join(sections), None
 
 
 def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
@@ -205,6 +219,7 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
 
     import date_utils
 
+    header = _render_level_header(conn)
     today = date_utils.today_madrid()
     yesterday = today - timedelta(days=1)
     today_iso = today.isoformat()
@@ -222,7 +237,7 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     floating = [t for t in pending if not t.get("due_date")]
 
     if not (grace or with_date or floating):
-        return "No tienes tareas pendientes. 🎉", None
+        return header + "No tienes tareas pendientes. 🎉", None
 
     sections: list[str] = []
     if grace:
@@ -240,7 +255,7 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
         lines = [f"• {t['text']}" for t in floating]
         sections.append("🌊 <b>FLOTANTES</b>\n" + "\n".join(lines))
 
-    text = "\n\n".join(sections)
+    text = header + "\n\n".join(sections)
 
     buttons: list[list[InlineKeyboardButton]] = []
     for t in grace + with_date + floating:
@@ -257,6 +272,7 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
 
     from date_utils import monday_of_week
 
+    header = _render_level_header(conn)
     monday = monday_of_week(today)
     sunday = monday + timedelta(days=6)
     week_start_iso = f"{monday.isoformat()}T00:00:00"
@@ -325,9 +341,9 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
         sections.append("✅ <b>COMPLETADO</b>\n" + "\n".join(lines))
 
     if not sections:
-        return "Semana tranquila 💆", None
+        return header + "Semana tranquila 💆", None
 
-    text = "\n\n".join(sections)
+    text = header + "\n\n".join(sections)
 
     buttons: list[list[InlineKeyboardButton]] = []
     for o in pending_objectives:
@@ -349,6 +365,7 @@ def render_metrics_view(
     """Panel de métricas de los últimos 30 días."""
     from datetime import timedelta
 
+    header = _render_level_header(conn)
     date_from = (today - timedelta(days=29)).isoformat()
     date_to = today.isoformat()
     m = tools.metrics_summary(date_from, date_to)
@@ -361,7 +378,7 @@ def render_metrics_view(
         or sum(m["objectives"].values()) > 0
     )
     if not has_any:
-        return "Todavía no hay datos suficientes para mostrar métricas.", None
+        return header + "Todavía no hay datos suficientes para mostrar métricas.", None
 
     sections: list[str] = [
         f"📊 <b>Métricas — últimos 30 días</b>"
@@ -400,4 +417,4 @@ def render_metrics_view(
             f"🟢 {ob['on_time']}  🟡 {ob['grace']}  🔴 {ob['missed']}"
         )
 
-    return "\n\n".join(sections), None
+    return header + "\n\n".join(sections), None

@@ -570,3 +570,55 @@ def test_metrics_view_with_data(monkeypatch):
     assert "🟢 1" in text
     assert "🟡 1" in text
     assert "%" not in text
+
+
+def test_render_today_view_includes_level_header_zero():
+    """Sin XP, la cabecera dice Nivel 0 sin medalla."""
+    with db.connect() as conn:
+        text, _ = views.render_today_view(date(2026, 5, 19), conn)
+    assert "Nivel 0" in text
+
+
+def test_render_today_view_includes_medal_when_level_up(monkeypatch):
+    """Con XP suficiente, la cabecera muestra medalla y nivel."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    # Forzar XP para nivel 1: 30 XP
+    with db.connect() as conn:
+        for _ in range(3):
+            conn.execute(
+                "INSERT INTO xp_log "
+                "(item_type, item_id, outcome, xp_amount, awarded_at) "
+                "VALUES ('task', 1, 'on_time', 10, '2026-05-19T10:00:00')"
+            )
+    with db.connect() as conn:
+        text, _ = views.render_today_view(date(2026, 5, 19), conn)
+    assert "🥉" in text
+    assert "Nivel 1" in text
+
+
+def test_render_metrics_view_includes_level_header(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    with db.connect() as conn:
+        text, _ = views.render_metrics_view(date(2026, 5, 30), conn)
+    # Aunque esté vacío, la cabecera siempre se incluye
+    assert "Nivel" in text
+
+
+def test_render_pending_view_includes_level_header(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    tools.add_task("X", due_date="2026-05-19")
+    with db.connect() as conn:
+        text, _ = views.render_pending_view(conn)
+    assert "Nivel" in text
+
+
+def test_render_week_view_includes_level_header():
+    with db.connect() as conn:
+        text, _ = views.render_week_view(date(2026, 5, 19), conn)
+    assert "Nivel" in text
+
+
+def test_render_tomorrow_view_includes_level_header():
+    with db.connect() as conn:
+        text, _ = views.render_tomorrow_view(date(2026, 5, 20), conn)
+    assert "Nivel" in text
