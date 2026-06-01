@@ -162,3 +162,28 @@ def test_add_event_without_reminders_is_unchanged():
     res = tools.add_event("Cita", when.isoformat(), "personal")
     assert "reminders_added" not in res
     assert "reminders_skipped" not in res
+
+
+def test_e2e_add_event_with_reminders_and_query():
+    """Smoke: añadir evento con reminders + leer y verificar shape.
+
+    Evento en 48h → fire_time del recordatorio de 1440 min = ahora + 48h - 24h = ahora + 24h,
+    que es futuro → sent=0 para ambos recordatorios.
+    """
+    when = (datetime.now() + timedelta(hours=48)).replace(microsecond=0)
+    res = tools.add_event(
+        "Reunión equipo",
+        when.isoformat(),
+        "work",
+        reminders=[30, 1440],  # 30 min + 1 día
+    )
+    assert sorted(res["reminders_added"]) == [30, 1440]
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT offset_minutes, sent FROM event_reminders "
+            "WHERE event_id = ? ORDER BY offset_minutes",
+            (res["id"],),
+        ).fetchall()
+    assert [r["offset_minutes"] for r in rows] == [30, 1440]
+    # Ambos pendientes (fire_time en el futuro)
+    assert all(r["sent"] == 0 for r in rows)
