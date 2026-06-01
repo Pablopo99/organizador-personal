@@ -141,7 +141,7 @@ def _calendar_button_keyboard(user_id: int):
     ]])
 
 
-async def _on_message(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
     user_id = update.effective_user.id
@@ -150,6 +150,19 @@ async def _on_message(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         return
     keyboard = _calendar_button_keyboard(user_id)
     await update.message.reply_text(reply, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    # Si Claude disparó una subida de nivel, mandar mensaje aparte
+    level_change = brain.pop_level_up(user_id)
+    if level_change:
+        level_before, level_after = level_change
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=_render_level_up_message(level_before, level_after),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception("Error enviando mensaje de subida de nivel post-brain")
 
 
 async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -191,6 +204,19 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     keyboard = _calendar_button_keyboard(from_user_id)
     await update.message.reply_text(reply, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    # Si Claude disparó una subida de nivel, mandar mensaje aparte
+    level_change = brain.pop_level_up(from_user_id)
+    if level_change:
+        level_before, level_after = level_change
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=_render_level_up_message(level_before, level_after),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception("Error enviando mensaje de subida de nivel post-brain (voz)")
 
 
 async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:

@@ -19,6 +19,19 @@ _history: dict[int, list[dict]] = {}
 # bot.py lee el registro (o cuando Claude llama a push_event_to_calendar).
 _pending_calendar_button: dict[int, int] = {}
 
+# Subida de nivel pendiente de notificar por usuario.
+# Se rellena cuando una tool devuelve level_after > level_before y se consume
+# en bot.py tras enviar la respuesta normal de Claude.
+_pending_level_up: dict[int, tuple[int, int]] = {}
+
+
+def record_level_up(user_id: int, level_before: int, level_after: int) -> None:
+    _pending_level_up[user_id] = (level_before, level_after)
+
+
+def pop_level_up(user_id: int):
+    return _pending_level_up.pop(user_id, None)
+
 
 def record_pending_calendar_button(user_id: int, event_id: int) -> None:
     _pending_calendar_button[user_id] = event_id
@@ -185,6 +198,13 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
                         record_pending_calendar_button(user_id, result["id"])
                     elif block.name == "push_event_to_calendar":
                         clear_pending_calendar_button(user_id)
+                    if isinstance(result, dict):
+                        lb = result.get("level_before")
+                        la = result.get("level_after")
+                        if (
+                            lb is not None and la is not None and la > lb
+                        ):
+                            record_level_up(user_id, lb, la)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,

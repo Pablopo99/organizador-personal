@@ -189,3 +189,13 @@ def test_system_prompt_mentions_calendar_tools():
     assert "connect_calendar" in prompt
     # Frases-trigger esperadas
     assert "calendar" in prompt.lower()
+
+
+def test_record_and_pop_level_up():
+    """record_level_up persiste hasta pop."""
+    import brain
+    brain.record_level_up(42, 4, 5)
+    res = brain.pop_level_up(42)
+    assert res == (4, 5)
+    # Segunda llamada → None
+    assert brain.pop_level_up(42) is None

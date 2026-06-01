@@ -623,3 +623,27 @@ async def test_callback_marks_task_and_sends_level_up(monkeypatch, temp_db_for_b
     ctx.bot.send_message.assert_called()
     sent_text = ctx.bot.send_message.call_args.kwargs["text"]
     assert "Nivel 1" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_brain_level_up_triggers_message(monkeypatch):
+    """Si brain registra subida, _on_message la envía aparte."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    import brain
+    brain.record_level_up(42, 0, 1)
+
+    update = MagicMock()
+    update.message.text = "hola"
+    update.message.reply_text = AsyncMock()
+    update.effective_user.id = 42
+
+    ctx = MagicMock()
+    ctx.bot.send_message = AsyncMock()
+
+    # Hacer que el path del mensaje no llame a Claude real
+    monkeypatch.setattr(bot.brain, "handle_message", lambda text, user_id=0: "ok")
+
+    await bot._on_message(update, ctx)
+
+    ctx.bot.send_message.assert_called_once()
+    assert "Nivel 1" in ctx.bot.send_message.call_args.kwargs["text"]
