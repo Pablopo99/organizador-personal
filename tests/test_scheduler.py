@@ -279,3 +279,28 @@ async def test_weekly_objectives_reminder_sends_message(monkeypatch):
     assert call.kwargs["parse_mode"] == "HTML"
 
 
+@pytest.mark.asyncio
+async def test_check_reminders_skips_defaults_when_event_has_customs(monkeypatch):
+    """Un evento con cualquier event_reminders NO recibe los defaults
+    aunque caigan dentro de la ventana."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    # Evento dentro de la ventana de 1h (entre 50 y 70 min)
+    when = (datetime.now() + timedelta(minutes=60)).replace(microsecond=0)
+    ev = tools.add_event("Cita", when.isoformat(), "personal")
+    # Añadir un recordatorio custom de 30 min antes (queda sent=0)
+    tools.add_event_reminder(ev["id"], 30)
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    # NO debió haberse mandado el default 1h (ni 1d, fuera de ventana)
+    assert send_mock.call_count == 0
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT reminder_1h_sent FROM events WHERE id = ?",
+            (ev["id"],),
+        ).fetchone()
+    assert row["reminder_1h_sent"] == 0
+
+

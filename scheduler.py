@@ -145,6 +145,10 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
               AND recurring_rule IS NULL
               AND datetime >= ?
               AND datetime <= ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM event_reminders
+                  WHERE event_reminders.event_id = events.id
+              )
             """,
             (now.isoformat(timespec="seconds"), upper.isoformat(timespec="seconds")),
         ).fetchall()
