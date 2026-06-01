@@ -274,6 +274,7 @@ def add_event(
     recurring_rule: Optional[str] = None,
     notes: Optional[str] = None,
     sync_to_calendar: bool = False,
+    reminders: Optional[list[int]] = None,
 ) -> dict:
     if category not in CATEGORIES:
         raise ValueError(
@@ -313,6 +314,24 @@ def add_event(
                 (gcal_id, new_id),
             )
         result["gcal_event_id"] = gcal_id
+
+    # Procesar reminders custom si vienen
+    if reminders is not None:
+        added: list[int] = []
+        skipped: list[int] = []
+        for offset in reminders:
+            if not isinstance(offset, int) or offset <= 0:
+                skipped.append(offset)
+                continue
+            sub = add_event_reminder(new_id, offset)
+            if sub.get("event_id") and not sub.get("already_exists"):
+                added.append(offset)
+            elif sub.get("already_exists"):
+                added.append(offset)
+            else:
+                skipped.append(offset)
+        result["reminders_added"] = added
+        result["reminders_skipped"] = skipped
 
     return result
 
@@ -1335,6 +1354,16 @@ TOOL_DEFINITIONS: list[dict] = [
                         "Si es true, además de añadir el evento al bot, lo manda a "
                         "Google Calendar. Úsala SOLO cuando el usuario lo pida "
                         "explícitamente ('mételo en el calendario' y similares)."
+                    ),
+                },
+                "reminders": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": (
+                        "Lista opcional de antelaciones (en minutos) para "
+                        "recordatorios custom. Si se pasa, los avisos por "
+                        "defecto (1d y 1h antes) NO se mandarán para este "
+                        "evento. Solo válido si recurring_rule es null."
                     ),
                 },
             },

@@ -121,3 +121,44 @@ def test_add_event_reminder_different_offsets_coexist():
             (ev["id"],),
         ).fetchall()
     assert [r["offset_minutes"] for r in rows] == [30, 180]
+
+
+def test_add_event_with_reminders_creates_rows():
+    when = (datetime.now() + timedelta(hours=24)).replace(microsecond=0)
+    res = tools.add_event(
+        "Cita María",
+        when.isoformat(),
+        "personal",
+        reminders=[30, 180],
+    )
+    assert "id" in res
+    assert sorted(res.get("reminders_added", [])) == [30, 180]
+    assert res.get("reminders_skipped", []) == []
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT offset_minutes FROM event_reminders "
+            "WHERE event_id = ? ORDER BY offset_minutes",
+            (res["id"],),
+        ).fetchall()
+    assert [r["offset_minutes"] for r in rows] == [30, 180]
+
+
+def test_add_event_with_reminders_skips_invalid_offsets():
+    """Offsets <= 0 se ignoran silenciosamente; los válidos sí entran."""
+    when = (datetime.now() + timedelta(hours=24)).replace(microsecond=0)
+    res = tools.add_event(
+        "Cita",
+        when.isoformat(),
+        "personal",
+        reminders=[30, 0, -10, 60],
+    )
+    assert sorted(res["reminders_added"]) == [30, 60]
+    assert sorted(res["reminders_skipped"]) == [-10, 0]
+
+
+def test_add_event_without_reminders_is_unchanged():
+    """Sin reminders no aparecen las nuevas claves en la respuesta."""
+    when = (datetime.now() + timedelta(hours=24)).replace(microsecond=0)
+    res = tools.add_event("Cita", when.isoformat(), "personal")
+    assert "reminders_added" not in res
+    assert "reminders_skipped" not in res
