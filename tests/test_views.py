@@ -246,8 +246,9 @@ def test_render_week_view_only_objective_has_button():
     assert btn.callback_data == f"mO:{o['id']}:W"
 
 
-def test_render_week_view_done_objective_appears_in_completado_tachado():
+def test_render_week_view_done_objective_appears_in_completado_tachado(monkeypatch):
     """Un objetivo hecho aparece en COMPLETADO tachado, NO en OBJETIVOS."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     o = tools.add_objective("Subir vídeos", "2026-05-18")
     tools.mark_objective_done(o["id"])
 
@@ -265,8 +266,9 @@ def test_render_week_view_done_objective_appears_in_completado_tachado():
     assert btn.callback_data == f"uO:{o['id']}:W"
 
 
-def test_render_week_view_pending_in_objectives_done_in_completado():
+def test_render_week_view_pending_in_objectives_done_in_completado(monkeypatch):
     """Pendiente en OBJETIVOS, hecho en COMPLETADO. Ambos con botón."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     o1 = tools.add_objective("Pendiente", "2026-05-18")
     o2 = tools.add_objective("Hecho", "2026-05-18")
     tools.mark_objective_done(o2["id"])

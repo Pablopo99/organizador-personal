@@ -372,7 +372,10 @@ def test_semana_no_longer_in_slash_prompts():
 @pytest.mark.asyncio
 async def test_callback_mark_objective_in_week_view(temp_db_for_bot, monkeypatch):
     import tools
+    import date_utils
+    from datetime import date
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     o = tools.add_objective("Terminar pres", "2026-05-18")
 
     query = _make_callback_query(f"mO:{o['id']}:W")
