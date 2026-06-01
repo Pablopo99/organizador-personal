@@ -53,7 +53,7 @@ Telegram ─► bot.py ─► brain.py ─► tools.py ─► db.py ─► SQLit
 
 - **`scheduler.py`** — Two APScheduler jobs registered in `bot.main()`:
   - `morning_summary` daily at 09:00 Madrid → sends greeting + `views.render_today_view` output.
-  - `check_reminders` every 5 min → for events ≤26h away, sends ⏰ 1h-before and 📅 1d-before alerts. Excludes recurring events (known gap, see [[pending-recurring-reminders]] memory).
+  - `check_reminders` every 5 min → para eventos puntuales ≤26h, manda los avisos por defecto ⏰ 1h-before y 📅 1d-before. **Los eventos con cualquier fila en `event_reminders` quedan excluidos de los defaults** (custom = control total, ver feature de recordatorios personalizados). En la misma pasada también revisa `event_reminders` con `sent=0` y dispara los customs cuya antelación cae en la ventana ±5 min (`"⏰ En {pretty} tienes: …"`). Excluye eventos recurrentes (gap pendiente, ver [[pending-recurring-reminders]]).
 
 - **`db.py`** — SQLite schema and `connect()` context manager. **Every connection enables `PRAGMA foreign_keys = ON`** so `ON DELETE CASCADE` actually fires (not default in SQLite). Migrations are idempotent additive only.
 

@@ -149,6 +149,8 @@ def _format_offset(minutes: int) -> str:
     if minutes == 10080:
         return "1 semana"
     days = minutes // 1440
+    if days == 1:
+        return "1 día"
     return f"{days} días"
 
 
