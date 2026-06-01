@@ -95,6 +95,21 @@ CREATE TABLE IF NOT EXISTS xp_log (
 
 CREATE INDEX IF NOT EXISTS idx_xp_log_awarded_at
     ON xp_log(awarded_at);
+
+CREATE TABLE IF NOT EXISTS event_reminders (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id        INTEGER NOT NULL,
+    offset_minutes  INTEGER NOT NULL,
+    sent            INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_reminders_event
+    ON event_reminders(event_id);
+
+CREATE INDEX IF NOT EXISTS idx_event_reminders_pending
+    ON event_reminders(sent, event_id);
 """
 
 
@@ -197,6 +212,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_xp_log_awarded_at
                 ON xp_log(awarded_at)
         """)
+
+    if "event_reminders" not in tables:
+        conn.execute("""
+            CREATE TABLE event_reminders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id        INTEGER NOT NULL,
+                offset_minutes  INTEGER NOT NULL,
+                sent            INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT    NOT NULL,
+                FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_reminders_event "
+            "ON event_reminders(event_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_reminders_pending "
+            "ON event_reminders(sent, event_id)"
+        )
 
 
 @contextmanager

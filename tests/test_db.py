@@ -362,3 +362,35 @@ def test_xp_log_default_item_id_is_zero(fresh_db):
             "SELECT item_id FROM xp_log WHERE item_type='perfect_day'"
         ).fetchone()
     assert row["item_id"] == 0
+
+
+def test_event_reminders_table_exists(fresh_db):
+    with db.connect() as conn:
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(event_reminders)"
+        ).fetchall()]
+    assert "event_id" in cols
+    assert "offset_minutes" in cols
+    assert "sent" in cols
+    assert "created_at" in cols
+
+
+def test_event_reminders_cascades_on_event_delete(fresh_db):
+    with db.connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO events (title, datetime, category, created_at) "
+            "VALUES ('Test', '2026-06-10T10:00:00', 'personal', '2026-06-01T08:00:00')"
+        )
+        event_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO event_reminders "
+            "(event_id, offset_minutes, sent, created_at) "
+            "VALUES (?, 30, 0, '2026-06-01T08:00:00')",
+            (event_id,),
+        )
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM event_reminders WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()[0]
+    assert count == 0
