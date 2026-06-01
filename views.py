@@ -418,3 +418,68 @@ def render_metrics_view(
         )
 
     return header + "\n\n".join(sections), None
+
+
+def render_nivel_view(
+    today: date, conn
+) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Panel de nivel con XP total, progreso, faltan y breakdown 30d."""
+    from datetime import timedelta
+
+    total = conn.execute(
+        "SELECT COALESCE(SUM(xp_amount), 0) AS t FROM xp_log"
+    ).fetchone()["t"] or 0
+    level = tools.compute_level(total)
+    medal = tools.medal_for_level(level)
+    medal_prefix = f"{medal} " if medal else ""
+
+    # XP del nivel actual y del siguiente
+    xp_for_current = 0 if level == 0 else 10 * level * (level + 2)
+    xp_for_next = 10 * (level + 1) * (level + 3)
+    needed = xp_for_next - total
+    progress_in_level = total - xp_for_current
+    range_in_level = xp_for_next - xp_for_current
+    pct = int(100 * progress_in_level / range_in_level) if range_in_level else 0
+
+    # Barra de 10 bloques
+    blocks_filled = int(pct / 10)
+    blocks_empty = 10 - blocks_filled
+    bar = "▓" * blocks_filled + "▒" * blocks_empty
+
+    sections = [
+        f"{medal_prefix}<b>Nivel {level}</b> — {total} XP",
+        f"Para nivel {level + 1} faltan: <b>{needed} XP</b>\n"
+        f"Progreso: {bar} {pct}%",
+    ]
+
+    # Breakdown últimos 30 días
+    cutoff = (today - timedelta(days=29)).isoformat()
+    rows = conn.execute(
+        "SELECT item_type, COALESCE(SUM(xp_amount), 0) AS sum_xp "
+        "FROM xp_log "
+        "WHERE substr(awarded_at, 1, 10) >= ? "
+        "GROUP BY item_type",
+        (cutoff,),
+    ).fetchall()
+    breakdown = {r["item_type"]: r["sum_xp"] for r in rows}
+    total_30d = sum(breakdown.values())
+
+    if total_30d > 0:
+        breakdown_lines = [
+            f"📊 <b>Últimos 30 días</b>: {total_30d} XP ganados"
+        ]
+        labels = [
+            ("routine", "Rutinas"),
+            ("task", "Tareas"),
+            ("event", "Eventos"),
+            ("objective", "Objetivos"),
+            ("perfect_day", "Días perfectos"),
+            ("perfect_week", "Semanas perfectas"),
+        ]
+        for key, label in labels:
+            value = breakdown.get(key, 0)
+            if value:
+                breakdown_lines.append(f"  {label}: {value} XP")
+        sections.append("\n".join(breakdown_lines))
+
+    return "\n\n".join(sections), None

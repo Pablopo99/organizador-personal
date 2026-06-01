@@ -624,3 +624,51 @@ def test_render_tomorrow_view_includes_level_header():
     with db.connect() as conn:
         text, _ = views.render_tomorrow_view(date(2026, 5, 20), conn)
     assert "Nivel" in text
+
+
+def test_render_nivel_view_zero(monkeypatch):
+    """Sin XP, muestra info de nivel 0."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    with db.connect() as conn:
+        text, kb = views.render_nivel_view(date(2026, 5, 30), conn)
+    assert "Nivel 0" in text
+    assert "30 XP" in text  # XP necesario para nivel 1
+
+
+def test_render_nivel_view_with_xp(monkeypatch):
+    """Con XP intermedio, muestra progreso, faltan y breakdown."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    with db.connect() as conn:
+        # 50 XP totales: nivel 1 (30) → 20/50 hacia nivel 2 (80)
+        conn.execute(
+            "INSERT INTO xp_log "
+            "(item_type, item_id, outcome, xp_amount, awarded_at) "
+            "VALUES ('task', 1, 'on_time', 50, '2026-05-30T10:00:00')"
+        )
+    with db.connect() as conn:
+        text, kb = views.render_nivel_view(date(2026, 5, 30), conn)
+    assert "Nivel 1" in text
+    assert "50 XP" in text
+    assert "Para nivel 2" in text  # falta info
+    assert "30 XP" in text  # faltan 80-50=30
+
+
+def test_render_nivel_view_30_day_breakdown(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO xp_log "
+            "(item_type, item_id, outcome, xp_amount, awarded_at) "
+            "VALUES ('task', 1, 'on_time', 10, '2026-05-29T10:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO xp_log "
+            "(item_type, item_id, outcome, xp_amount, awarded_at) "
+            "VALUES ('routine', 2, 'on_time', 6, '2026-05-28T10:00:00')"
+        )
+    with db.connect() as conn:
+        text, kb = views.render_nivel_view(date(2026, 5, 30), conn)
+    # Breakdown debe aparecer
+    assert "Últimos 30 días" in text
+    assert "Rutinas" in text
+    assert "Tareas" in text

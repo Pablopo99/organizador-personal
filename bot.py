@@ -288,6 +288,25 @@ async def _on_metricas(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _on_nivel(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/nivel: panel del sistema XP."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/nivel ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_nivel_view(today, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 _CALLBACK_ACTIONS = {
     "mE": lambda i: tools.mark_event_done(i),
     "uE": lambda i: tools.unmark_event_done(i),
@@ -452,6 +471,7 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("objetivos", "Objetivos de la semana"),
         BotCommand("rachas", "Mis rachas"),
         BotCommand("metricas", "Métricas de cumplimiento"),
+        BotCommand("nivel", "Tu nivel y XP"),
         BotCommand("nueva", "Reiniciar conversación"),
     ]
     try:
@@ -484,6 +504,7 @@ async def _async_main() -> None:
     app.add_handler(CommandHandler("pendientes", _on_pendientes))
     app.add_handler(CommandHandler("semana", _on_semana))
     app.add_handler(CommandHandler("metricas", _on_metricas))
+    app.add_handler(CommandHandler("nivel", _on_nivel))
     for cmd in ("objetivos", "rachas"):
         app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
 

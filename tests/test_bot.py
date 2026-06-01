@@ -554,3 +554,32 @@ def test_rachas_prompt_mentions_30_day_stats():
     assert "30" in prompt
     assert "on_time" in prompt or "🟢" in prompt
     assert "routine_summary" in prompt
+
+
+@pytest.mark.asyncio
+async def test_on_nivel_sends_text(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 42
+
+    await bot._on_nivel(update, MagicMock())
+
+    reply_mock.assert_called_once()
+    args, kwargs = reply_mock.call_args
+    text = args[0] if args else kwargs.get("text")
+    assert "Nivel" in text
+
+
+@pytest.mark.asyncio
+async def test_on_nivel_unauthorized_ignored(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 999
+
+    await bot._on_nivel(update, MagicMock())
+
+    reply_mock.assert_not_called()
