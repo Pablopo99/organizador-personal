@@ -1,10 +1,13 @@
 """Orquestación de Claude: envía mensajes, gestiona tool use, devuelve respuesta."""
+import logging
 from datetime import datetime
 
 import anthropic
 
 import tools
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TIMEZONE
+
+log = logging.getLogger(__name__)
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -83,6 +86,7 @@ Manejo de fechas:
 Distinción de tipos:
 - "Tareas" = lista pendiente sin fecha (list_tasks). "Eventos/citas/reuniones" = con fecha y hora (query_events). "Objetivos" = metas semanales (query_objectives).
 - Al crear una tarea: las tareas tienen due_date opcional (formato YYYY-MM-DD). Si Pablo no menciona fecha y la tarea no es obviamente flotante ("comprar pan algún día"), pregunta primero "¿Para qué día? (hoy / mañana / esta semana / sin fecha)". Solo llama a add_task una vez tengas la decisión. Si Pablo dice "sin fecha", llama con due_date=null. Si dice un día concreto, resuelve a YYYY-MM-DD.
+- **Objetivos de la semana (no tareas)**: si Pablo manda una lista numerada (1., 2., 3. …) en domingo o lunes, o tras el recordatorio "Domingo de objetivos", o diciendo "son mis objetivos / mis 3 objetivos / mis metas de la semana / objetivos de esta semana", interpreta CADA elemento como un objetivo semanal y llama a add_objective una vez por cada uno con week_start = lunes de la semana en curso (si hoy es domingo, week_start = el lunes que entra). NO preguntes "¿Para qué día?" — son objetivos, no tareas. Confirma con una frase corta: "Apuntados N objetivos para esta semana."
 - Si pregunta "¿qué tengo hoy?", consulta TANTO eventos del día COMO tareas pendientes. Muestra ambas listas si hay algo en cada una.
 
 Marcar cosas como hechas (TRES herramientas distintas según el tipo):
@@ -170,7 +174,7 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
     for _ in range(_MAX_TOOL_TURNS):
         response = _client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=4096,
             system=system,
             tools=tools.TOOL_DEFINITIONS,
             messages=history,
@@ -220,6 +224,11 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
             history.append({"role": "user", "content": tool_results})
             continue
 
+        log.warning(
+            "stop_reason inesperado: %s (user=%s)",
+            response.stop_reason,
+            user_id,
+        )
         history.append({"role": "assistant", "content": response.content})
         _trim_history(user_id)
         return _extract_text(response) or "(Sin respuesta)"
