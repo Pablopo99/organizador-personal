@@ -33,12 +33,6 @@ log = logging.getLogger("bot")
 
 # Mapa de comandos slash → frase natural que recibe el cerebro
 _SLASH_PROMPTS = {
-    "/objetivos": (
-        "Muéstrame el estado de mis objetivos de esta semana. "
-        "Llama a query_objectives(week_start=lunes de esta semana). "
-        "Lista cada uno con ✅ si está done=1 o 🔲 si no. "
-        "Una frase de cierre con ánimo. Sin preámbulos."
-    ),
     "/rachas": (
         "Muestra el estado de las rachas de mis rutinas con stats de los últimos 30 días. "
         "SIGUE ESTOS PASOS:\n"
@@ -308,6 +302,25 @@ async def _on_pendientes(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _on_objetivos(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/objetivos: objetivos de la semana con botón por ítem (sin Claude)."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/objetivos ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_objectives_view(today, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 async def _on_semana(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """/semana: resumen de la semana con botones solo en objetivos."""
     if not update.message or not update.effective_user:
@@ -525,6 +538,8 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text, keyboard = views.render_pending_view(conn)
         elif view_letter == "W":
             text, keyboard = views.render_week_view(today, conn)
+        elif view_letter == "O":
+            text, keyboard = views.render_objectives_view(today, conn)
         elif view_letter == "Hc":
             text, keyboard = views.render_today_view(today, conn, show_completed=True)
         else:
@@ -605,8 +620,8 @@ async def _async_main() -> None:
     app.add_handler(CommandHandler("semana", _on_semana))
     app.add_handler(CommandHandler("metricas", _on_metricas))
     app.add_handler(CommandHandler("nivel", _on_nivel))
-    for cmd in ("objetivos", "rachas"):
-        app.add_handler(CommandHandler(cmd, _make_slash_handler(f"/{cmd}")))
+    app.add_handler(CommandHandler("objetivos", _on_objetivos))
+    app.add_handler(CommandHandler("rachas", _make_slash_handler("/rachas")))
 
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))

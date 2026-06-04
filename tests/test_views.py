@@ -719,3 +719,32 @@ def test_render_nivel_view_30_day_breakdown(monkeypatch):
     assert "Últimos 30 días" in text
     assert "Rutinas" in text
     assert "Tareas" in text
+
+
+def test_render_objectives_view_pending_and_done(monkeypatch):
+    """/objetivos: pendientes en OBJETIVOS, hechos en COMPLETADO tachados,
+    con botón por ítem (vista O)."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    o1 = tools.add_objective("Pendiente A", "2026-05-18")
+    o2 = tools.add_objective("Hecho B", "2026-05-18")
+    tools.mark_objective_done(o2["id"])
+
+    with db.connect() as conn:
+        text, keyboard = views.render_objectives_view(date(2026, 5, 19), conn)
+
+    assert "🎯 <b>OBJETIVOS</b>" in text
+    assert "Pendiente A" in text
+    assert "🏆 <b>COMPLETADO</b>" in text
+    assert "<s>Hecho B</s>" in text
+    # Un botón por objetivo, callbacks con vista O
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"mO:{o1['id']}:O" in datas
+    assert f"uO:{o2['id']}:O" in datas
+
+
+def test_render_objectives_view_empty(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    with db.connect() as conn:
+        text, keyboard = views.render_objectives_view(date(2026, 5, 19), conn)
+    assert "Sin objetivos" in text
+    assert keyboard is None

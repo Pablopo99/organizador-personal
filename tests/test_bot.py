@@ -89,16 +89,22 @@ def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatc
     assert "no puedo procesar" in reply.lower()
 
 
-def test_slash_objetivos_dispatches_objectives(monkeypatch):
+def test_slash_rachas_dispatches_to_brain(monkeypatch):
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
 
     def fake_brain(text, user_id=0):
-        assert "objetivos" in text.lower()
+        assert "racha" in text.lower()
         return "ok"
 
     monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
-    reply = bot.process_slash_command("/objetivos", from_user_id=42)
+    reply = bot.process_slash_command("/rachas", from_user_id=42)
     assert reply == "ok"
+
+
+def test_slash_objetivos_ya_no_pasa_por_claude(monkeypatch):
+    """/objetivos ahora es determinista (handler directo), ya no va al brain."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    assert bot.process_slash_command("/objetivos", from_user_id=42) is None
 
 
 def test_slash_unauthorized_user_returns_none(monkeypatch):

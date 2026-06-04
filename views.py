@@ -370,6 +370,46 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
     return text, keyboard
 
 
+def render_objectives_view(
+    today: date, conn
+) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /objetivos: objetivos de la semana en curso con botón por ítem
+    (igual patrón que /hoy). Pendientes en 🎯 OBJETIVOS, hechos en 🏆 COMPLETADO."""
+    from date_utils import monday_of_week
+
+    header = _render_level_header(conn)
+    monday = monday_of_week(today)
+    objectives = tools.query_objectives(monday.isoformat())
+
+    pending = [o for o in objectives if not o["done"] and o.get("outcome") != "missed"]
+    done = [o for o in objectives if o["done"] and o.get("outcome") != "missed"]
+
+    sections: list[str] = []
+    if pending:
+        lines = [f"• {o['text']}" for o in pending]
+        sections.append("🎯 <b>OBJETIVOS</b>\n" + "\n".join(lines))
+    if done:
+        lines = [f"• <s>{o['text']}</s>" for o in done]
+        sections.append("🏆 <b>COMPLETADO</b>\n" + "\n".join(lines))
+
+    if not sections:
+        return header + "Sin objetivos esta semana. ¿Defines alguno? 🎯", None
+
+    text = header + "\n\n".join(sections)
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for o in pending:
+        buttons.append([InlineKeyboardButton(
+            f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:O"
+        )])
+    for o in done:
+        buttons.append([InlineKeyboardButton(
+            f"✅ {o['text']}", callback_data=f"uO:{o['id']}:O"
+        )])
+    keyboard = InlineKeyboardMarkup(buttons) if buttons else None
+    return text, keyboard
+
+
 def render_metrics_view(
     today: date, conn
 ) -> tuple[str, Optional[InlineKeyboardMarkup]]:
