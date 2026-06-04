@@ -153,7 +153,7 @@ Plantilla para resúmenes (úsala como guía, ajusta lo que no encaje):
 • Comprar pan
 • Llamar fontanero
 
-✅ <b>COMPLETADO HOY</b>
+🏆 <b>COMPLETADO HOY</b>
 
 • <s>Reunión equipo (09:00)</s>
 • <s>50 flexiones diarias</s>

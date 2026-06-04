@@ -69,6 +69,7 @@ def test_render_event_done_appears_in_completado_with_check_button(monkeypatch):
     text, keyboard = _render_with_completed()
 
     assert "COMPLETADO HOY" in text
+    assert "🏆" in text  # encabezado con trofeo, no ✅
     assert "<s>10:00 — Reunión</s>" in text
     btn_texts = [row[0].text for row in keyboard.inline_keyboard]
     assert any(t.startswith("✅") and "Reunión" in t for t in btn_texts)

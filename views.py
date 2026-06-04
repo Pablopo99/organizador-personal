@@ -120,7 +120,7 @@ def render_today_view(
             lines.append(f"• <s>{e['title']}{suffix}</s>")
         for t in task_done_today:
             lines.append(f"• <s>{t['text']}</s>")
-        sections.append("✅ <b>COMPLETADO HOY</b>\n" + "\n".join(lines))
+        sections.append("🏆 <b>COMPLETADO HOY</b>\n" + "\n".join(lines))
 
     if not sections:
         return header + "Día libre, disfrútalo 💪", None
@@ -349,7 +349,7 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             lines.append(f"• <s>{o['text']}</s>")
         for t in task_done_week:
             lines.append(f"• <s>{t['text']}</s>")
-        sections.append("✅ <b>COMPLETADO</b>\n" + "\n".join(lines))
+        sections.append("🏆 <b>COMPLETADO</b>\n" + "\n".join(lines))
 
     if not sections:
         return header + "Semana tranquila 💆", None
