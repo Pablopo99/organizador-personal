@@ -343,7 +343,7 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
         lines = []
         for e in week_done:
             dt = datetime.fromisoformat(e["datetime"])
-            wd = weekdays_es[dt.weekday()]
+            wd = weekdays_es_full[dt.weekday()]
             lines.append(f"• <s>{wd} {dt.strftime('%H:%M')} — {e['title']}</s>")
         for o in done_objectives:
             lines.append(f"• <s>{o['text']}</s>")

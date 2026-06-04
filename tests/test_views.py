@@ -255,6 +255,22 @@ def test_render_week_view_groups_events_by_weekday():
     assert "• Jue " not in text
 
 
+def test_render_week_view_completado_con_evento_done_renderiza(monkeypatch):
+    """Regression: un evento marcado done debe renderizar en COMPLETADO
+    sin crashear. Antes usaba la variable weekdays_es que ya no existía,
+    y el comando /semana petaba con NameError en producción."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    ev = tools.add_event("Reunión cliente", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(ev["id"])
+
+    text, _ = _render_week(today=date(2026, 5, 18))
+
+    assert "COMPLETADO" in text
+    assert "Reunión cliente" in text
+    # Encabezado de día con nombre completo
+    assert "Martes" in text
+
+
 def test_render_week_view_only_objective_has_button():
     tools.add_event("Reunión Marta", "2026-05-19T10:00:00", "work")
     o = tools.add_objective("Terminar pres Spotify", "2026-05-18")
