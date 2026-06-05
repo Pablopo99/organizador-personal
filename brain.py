@@ -75,17 +75,15 @@ def reset_calendar_button(user_id: int) -> None:
 
 
 def _system_prompt() -> str:
-    now = datetime.now().isoformat(timespec="minutes")
-    weekday = [
-        "lunes", "martes", "miércoles", "jueves",
-        "viernes", "sábado", "domingo",
-    ][datetime.now().weekday()]
+    """Parte ESTÁTICA del system prompt (sin fecha/hora, que cambia cada
+    minuto y rompería el prompt caching). La fecha/hora actual se añade como
+    un bloque de sistema aparte en handle_message."""
     return f"""Eres el coach personal de organización de Pablo, un usuario hispanohablante.
 
 Contexto:
-- Fecha y hora ahora: {now} ({weekday})
 - Zona horaria: {TIMEZONE}
 - Idioma: español de España.
+- La fecha y hora actuales se indican al final de este mensaje de sistema.
 
 Personalidad y tono:
 - Tuteas siempre. Cercano, motivador, con humor sano cuando encaja.
@@ -191,7 +189,24 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
     history = _history.setdefault(user_id, [])
     history.append({"role": "user", "content": user_text})
 
-    system = _system_prompt()
+    # System como dos bloques: el estático (grande, con cache_control para
+    # cachear tools + reglas) y la fecha/hora actual (volátil, fuera de caché).
+    now = datetime.now().isoformat(timespec="minutes")
+    weekday = [
+        "lunes", "martes", "miércoles", "jueves",
+        "viernes", "sábado", "domingo",
+    ][datetime.now().weekday()]
+    system = [
+        {
+            "type": "text",
+            "text": _system_prompt(),
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": f"Fecha y hora ahora: {now} ({weekday}).",
+        },
+    ]
 
     for _ in range(_MAX_TOOL_TURNS):
         response = _client.messages.create(

@@ -52,6 +52,23 @@ def test_handle_message_text_only(monkeypatch):
     assert "Hola" in reply
 
 
+def test_handle_message_system_uses_prompt_caching(monkeypatch):
+    """El system se manda como dos bloques: el estático con cache_control
+    (cachea tools+reglas) y la fecha/hora actual como bloque volátil aparte."""
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _text_response("ok")
+    monkeypatch.setattr(brain, "_client", mock_client)
+
+    brain.handle_message("hola", user_id=1234)
+
+    system = mock_client.messages.create.call_args.kwargs["system"]
+    assert isinstance(system, list)
+    assert system[0]["cache_control"] == {"type": "ephemeral"}
+    # El bloque dinámico (fecha) NO lleva cache_control y va el último
+    assert "Fecha y hora ahora" in system[-1]["text"]
+    assert "cache_control" not in system[-1]
+
+
 def test_handle_message_with_tool_use(monkeypatch):
     responses = _tool_use_then_text(
         "add_task", {"text": "comprar pan"}, "Hecho, añadida."
