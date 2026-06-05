@@ -212,6 +212,9 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             """
         ).fetchall()
 
+    # Agrupamos los que disparan en esta pasada por antelación (pretty), para
+    # mandar UN mensaje cuando varias cosas coinciden a la misma hora.
+    due: dict[str, list] = {}
     for r in custom_rows:
         try:
             event_dt = datetime.fromisoformat(r["datetime"])
@@ -222,26 +225,29 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
         fire_time = event_dt - timedelta(minutes=r["offset_minutes"])
-        diff_sec = abs((fire_time - now).total_seconds())
-        if diff_sec <= 5 * 60:
-            pretty = _format_offset(r["offset_minutes"])
-            text = f"⏰ En {pretty} tienes: <b>{r['title']}</b>"
-            try:
-                await context.bot.send_message(
-                    chat_id=ALLOWED_USER_ID,
-                    text=text,
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception:
-                log.exception(
-                    "Error enviando recordatorio custom %s",
-                    r["reminder_id"],
-                )
-                continue
-            with db.connect() as conn:
+        if abs((fire_time - now).total_seconds()) <= 5 * 60:
+            due.setdefault(_format_offset(r["offset_minutes"]), []).append(r)
+
+    for pretty, group in due.items():
+        titles = ", ".join(f"<b>{g['title']}</b>" for g in group)
+        text = f"⏰ En {pretty} tienes: {titles}"
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=text,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception(
+                "Error enviando recordatorio(s) custom %s",
+                [g["reminder_id"] for g in group],
+            )
+            continue
+        with db.connect() as conn:
+            for g in group:
                 conn.execute(
                     "UPDATE event_reminders SET sent = 1 WHERE id = ?",
-                    (r["reminder_id"],),
+                    (g["reminder_id"],),
                 )
 
 

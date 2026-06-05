@@ -332,6 +332,36 @@ async def test_check_reminders_sends_custom_within_window(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_check_reminders_groups_same_time_into_one_message(monkeypatch):
+    """Tres eventos a la misma hora con la misma antelación → UN solo mensaje
+    con los tres títulos, no tres mensajes."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    ids = []
+    for title in ("Dentista", "Llamar banco", "Recoger paquete"):
+        ev = tools.add_event(title, when.isoformat(), "personal")
+        tools.add_event_reminder(ev["id"], 30)
+        ids.append(ev["id"])
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    send_mock.assert_called_once()  # un único mensaje
+    text = send_mock.call_args.kwargs["text"]
+    assert "Dentista" in text
+    assert "Llamar banco" in text
+    assert "Recoger paquete" in text
+    assert "30 min" in text
+    # los tres marcados como enviados
+    with db.connect() as conn:
+        sent = conn.execute(
+            "SELECT COUNT(*) FROM event_reminders WHERE sent = 1"
+        ).fetchone()[0]
+    assert sent == 3
+
+
+@pytest.mark.asyncio
 async def test_check_reminders_does_not_resend_sent_custom(monkeypatch):
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     import tools
