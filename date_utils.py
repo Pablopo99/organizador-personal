@@ -26,9 +26,23 @@ def now_madrid_naive() -> datetime:
     return now_madrid().replace(tzinfo=None)
 
 
+# Modo búho: hasta esta hora (Madrid) el "día lógico" sigue siendo el anterior,
+# para poder marcar lo de "ayer" de madrugada sin que el día haya rodado.
+_OWL_CUTOFF_HOUR = 4
+
+
 def today_madrid() -> date:
-    """Fecha actual en zona horaria de Madrid."""
-    return now_madrid().date()
+    """Día 'lógico' en Madrid con corte a las 4:00 (modo búho).
+
+    Entre medianoche y las 4:00 devuelve el día anterior. A partir de las 4:00,
+    el día natural. Solo afecta a la lógica basada en "qué día es hoy" (marcado,
+    /hoy, /semana, día perfecto); los timestamps reales (now_iso, now_madrid)
+    NO se desplazan, así que los recordatorios siguen disparando a su hora real.
+    """
+    now = now_madrid()
+    if now.hour < _OWL_CUTOFF_HOUR:
+        return (now - timedelta(days=1)).date()
+    return now.date()
 
 
 def monday_of_week(d: date) -> date:
