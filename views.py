@@ -441,6 +441,37 @@ def render_objectives_view(
     return text, keyboard
 
 
+def render_rachas_view(
+    today: date, conn
+) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /rachas: estado de rachas de rutinas con stats de 30 días.
+    Solo lectura (sin botones). Determinista, sin Claude."""
+    from datetime import timedelta
+
+    header = _render_level_header(conn)
+    date_from = (today - timedelta(days=29)).isoformat()
+    date_to = today.isoformat()
+    routines = tools.routine_summary(date_from, date_to)
+
+    if not routines:
+        return header + "Aún no tienes rutinas registradas.", None
+
+    lines = ["🔥 <b>RACHAS</b>"]
+    for r in routines:
+        line = f"• {r['title']} — racha {r['current_streak']} días"
+        sched = r["scheduled_days"]
+        if sched > 0:
+            pct_on = round(100 * r["on_time_count"] / sched)
+            pct_grace = round(100 * r["grace_count"] / sched)
+            pct_missed = 100 - pct_on - pct_grace
+            line += f" (30d: 🟢 {pct_on}% 🟡 {pct_grace}% 🔴 {pct_missed}%)"
+        if r["current_streak"] == r["best_streak"] and r["best_streak"] > 0:
+            line += " 🏆"
+        lines.append(line)
+
+    return header + "\n".join(lines), None
+
+
 def render_metrics_view(
     today: date, conn
 ) -> tuple[str, Optional[InlineKeyboardMarkup]]:

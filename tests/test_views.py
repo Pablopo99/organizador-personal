@@ -772,3 +772,39 @@ def test_render_objectives_view_empty(monkeypatch):
         text, keyboard = views.render_objectives_view(date(2026, 5, 19), conn)
     assert "Sin objetivos" in text
     assert keyboard is None
+
+
+def test_render_rachas_view_empty(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    with db.connect() as conn:
+        text, keyboard = views.render_rachas_view(date(2026, 5, 30), conn)
+    assert "Aún no tienes rutinas" in text
+    assert keyboard is None
+
+
+def test_render_rachas_view_streak_and_percentages(monkeypatch):
+    """Rutina diaria con varias completions: muestra racha, % 30d y 🏆 si
+    current_streak == best_streak."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    r = tools.add_event(
+        "Meditar", "2026-05-28T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    # Completions on_time el 28 y 29; el 30 queda pendiente (no marcado).
+    with db.connect() as conn:
+        for d in ("2026-05-28", "2026-05-29"):
+            conn.execute(
+                "INSERT INTO routine_completions "
+                "(event_id, completion_date, created_at, status) "
+                "VALUES (?, ?, ?, 'on_time')",
+                (r["id"], d, "2026-05-30T08:00:00"),
+            )
+
+    with db.connect() as conn:
+        text, keyboard = views.render_rachas_view(date(2026, 5, 30), conn)
+
+    assert "🔥 <b>RACHAS</b>" in text
+    assert "Meditar" in text
+    assert "racha" in text
+    assert "30d:" in text
+    assert "🟢" in text and "🟡" in text and "🔴" in text
+    assert keyboard is None

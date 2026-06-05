@@ -89,16 +89,10 @@ def test_process_voice_transcription_brain_exception_returns_friendly(monkeypatc
     assert "no puedo procesar" in reply.lower()
 
 
-def test_slash_rachas_dispatches_to_brain(monkeypatch):
+def test_slash_rachas_ya_no_pasa_por_claude(monkeypatch):
+    """/rachas ahora es determinista (handler directo), ya no va al brain."""
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
-
-    def fake_brain(text, user_id=0):
-        assert "racha" in text.lower()
-        return "ok"
-
-    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
-    reply = bot.process_slash_command("/rachas", from_user_id=42)
-    assert reply == "ok"
+    assert bot.process_slash_command("/rachas", from_user_id=42) is None
 
 
 def test_slash_objetivos_ya_no_pasa_por_claude(monkeypatch):
@@ -154,22 +148,6 @@ def test_markdown_bold_converted_in_voice_transcription(monkeypatch):
 def test_hoy_no_longer_in_slash_prompts():
     """/hoy ya no se procesa via Claude — tiene handler dedicado."""
     assert "/hoy" not in bot._SLASH_PROMPTS
-
-
-
-
-def test_rachas_prompt_registered():
-    prompt = bot._SLASH_PROMPTS["/rachas"]
-    assert "RACHAS" in prompt
-    assert "routine_summary" in prompt
-    assert "current_streak" in prompt
-    assert "best_streak" in prompt
-
-
-def test_rachas_prompt_uses_emoji_and_format():
-    prompt = bot._SLASH_PROMPTS["/rachas"]
-    assert "🔥" in prompt
-    assert "🏆" in prompt
 
 
 
@@ -553,13 +531,6 @@ async def test_callback_dT_discards_task(monkeypatch, temp_db_for_bot):
         ).fetchone()
     assert row["outcome"] == "missed"
     query.edit_message_text.assert_called_once()
-
-
-def test_rachas_prompt_mentions_30_day_stats():
-    prompt = bot._SLASH_PROMPTS["/rachas"]
-    assert "30" in prompt
-    assert "on_time" in prompt or "🟢" in prompt
-    assert "routine_summary" in prompt
 
 
 @pytest.mark.asyncio

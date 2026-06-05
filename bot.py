@@ -32,28 +32,10 @@ log = logging.getLogger("bot")
 
 
 # Mapa de comandos slash → frase natural que recibe el cerebro
-_SLASH_PROMPTS = {
-    "/rachas": (
-        "Muestra el estado de las rachas de mis rutinas con stats de los últimos 30 días. "
-        "SIGUE ESTOS PASOS:\n"
-        "1. Calcula date_from = hoy menos 29 días en YYYY-MM-DD, date_to = hoy en YYYY-MM-DD.\n"
-        "2. Llama a routine_summary(date_from, date_to). Los streaks son globales, el rango "
-        "solo afecta a los conteos on_time_count/grace_count/scheduled_days.\n"
-        "3. Empieza la respuesta con un título de sección en negrita: 🔥 <b>RACHAS</b>\n"
-        "4. Para cada rutina del paso 2, una línea con formato exacto:\n"
-        "   • {title} — racha {current_streak} días "
-        "(30d: 🟢 {pct_on_time}% 🟡 {pct_grace}% 🔴 {pct_missed}%)\n"
-        "   donde:\n"
-        "   - pct_on_time  = round(100 * on_time_count / scheduled_days)\n"
-        "   - pct_grace    = round(100 * grace_count   / scheduled_days)\n"
-        "   - pct_missed   = 100 - pct_on_time - pct_grace\n"
-        "   Si scheduled_days == 0, omite el paréntesis (30d:...).\n"
-        "   Si current_streak == best_streak Y best_streak > 0, añade ' 🏆' al final de la línea.\n"
-        "5. Cierre motivador opcional de UNA frase si encaja.\n"
-        "6. Si no hay rutinas (lista vacía del paso 2), responde solo: «Aún no tienes rutinas registradas.»\n"
-        "NADA de preámbulos ni preguntas."
-    ),
-}
+# Comandos slash que se delegan al cerebro (Claude). Vacío: /hoy, /manana,
+# /pendientes, /semana, /metricas, /nivel, /objetivos y /rachas son todos
+# deterministas (handlers directos, sin Claude).
+_SLASH_PROMPTS: dict[str, str] = {}
 
 # Comandos slash que NO van al cerebro (control de bot)
 _RESET_COMMANDS = ("/nueva", "/reset", "/clear")
@@ -313,6 +295,25 @@ async def _on_objetivos(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     today = date_utils.today_madrid()
     with db.connect() as conn:
         text, keyboard = views.render_objectives_view(today, conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
+async def _on_rachas(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/rachas: estado de rachas de rutinas (sin Claude)."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/rachas ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    today = date_utils.today_madrid()
+    with db.connect() as conn:
+        text, keyboard = views.render_rachas_view(today, conn)
 
     await update.message.reply_text(
         text,
@@ -623,7 +624,7 @@ async def _async_main() -> None:
     app.add_handler(CommandHandler("metricas", _on_metricas))
     app.add_handler(CommandHandler("nivel", _on_nivel))
     app.add_handler(CommandHandler("objetivos", _on_objetivos))
-    app.add_handler(CommandHandler("rachas", _make_slash_handler("/rachas")))
+    app.add_handler(CommandHandler("rachas", _on_rachas))
 
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
