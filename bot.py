@@ -303,6 +303,24 @@ async def _on_objetivos(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _on_duplicados(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/duplicados: posibles tareas/eventos repetidos con botón para borrar."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/duplicados ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+
+    with db.connect() as conn:
+        text, keyboard = views.render_duplicados_view(conn)
+
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=keyboard,
+    )
+
+
 async def _on_rachas(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """/rachas: estado de rachas de rutinas (sin Claude)."""
     if not update.message or not update.effective_user:
@@ -412,6 +430,8 @@ _CALLBACK_ACTIONS = {
     "uT": lambda i: tools.uncomplete_task(i),
     "mO": lambda i: tools.mark_objective_done(i),
     "uO": lambda i: tools.unmark_objective_done(i),
+    "xT": lambda i: tools.delete_task(i),
+    "xE": lambda i: tools.delete_event(i),
     "tg": lambda i: None,  # toggle de visibilidad: no muta, solo re-renderiza
     "gc": lambda i: tools.push_event_to_calendar(i),
     "rE": lambda i: tools.recreate_event(i),
@@ -543,6 +563,8 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text, keyboard = views.render_week_view(today, conn, show_completed=False)
         elif view_letter == "O":
             text, keyboard = views.render_objectives_view(today, conn)
+        elif view_letter == "D":
+            text, keyboard = views.render_duplicados_view(conn)
         elif view_letter == "Hc":
             text, keyboard = views.render_today_view(today, conn, show_completed=True)
         else:
@@ -588,6 +610,7 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("pendientes", "Tareas pendientes"),
         BotCommand("objetivos", "Objetivos de la semana"),
         BotCommand("rachas", "Mis rachas"),
+        BotCommand("duplicados", "Revisar duplicados"),
         BotCommand("metricas", "Métricas de cumplimiento"),
         BotCommand("nivel", "Tu nivel y XP"),
         BotCommand("nueva", "Reiniciar conversación"),
@@ -625,6 +648,7 @@ async def _async_main() -> None:
     app.add_handler(CommandHandler("nivel", _on_nivel))
     app.add_handler(CommandHandler("objetivos", _on_objetivos))
     app.add_handler(CommandHandler("rachas", _on_rachas))
+    app.add_handler(CommandHandler("duplicados", _on_duplicados))
 
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))

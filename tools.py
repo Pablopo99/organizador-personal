@@ -292,6 +292,21 @@ def add_event(
 
     result = {"id": new_id, "title": title, "datetime": datetime_iso}
 
+    if not recurring_rule:
+        with db.connect() as conn:
+            evs = conn.execute(
+                "SELECT id, title FROM events "
+                "WHERE done = 0 AND recurring_rule IS NULL AND id != ?",
+                (new_id,),
+            ).fetchall()
+        dups = [
+            {"id": e["id"], "title": e["title"]}
+            for e in evs
+            if _titles_similar(e["title"], title)
+        ]
+        if dups:
+            result["possible_duplicates"] = dups
+
     if sync_to_calendar:
         try:
             gcal_id = gcal_sync.push_event({
@@ -1163,7 +1178,15 @@ def add_task(text: str, due_date: Optional[str] = None) -> dict:
             (text, now_iso(), due_date),
         )
         new_id = cur.lastrowid
-    return {"id": new_id, "text": text, "due_date": due_date}
+    result = {"id": new_id, "text": text, "due_date": due_date}
+    dups = [
+        {"id": t["id"], "text": t["text"]}
+        for t in list_tasks(include_done=False)
+        if t["id"] != new_id and _titles_similar(t["text"], text)
+    ]
+    if dups:
+        result["possible_duplicates"] = dups
+    return result
 
 
 def list_tasks(include_done: bool = False) -> list[dict]:
@@ -1179,6 +1202,85 @@ def list_tasks(include_done: bool = False) -> list[dict]:
                 "ORDER BY id"
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+def delete_task(task_id: int) -> dict:
+    """Borra una tarea por id. Uso interno (callback de /duplicados)."""
+    with db.connect() as conn:
+        cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    return {"id": task_id, "deleted": cur.rowcount}
+
+
+# ------------------------------------------------------------- duplicados ----
+
+def _normalize_title(s: str) -> str:
+    """Normaliza un título para comparar: minúsculas, sin acentos ni
+    puntuación, espacios colapsados."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = re.sub(r"[^\w\s]", " ", s.lower())
+    return " ".join(s.split())
+
+
+def _titles_similar(a: str, b: str) -> bool:
+    """True si dos títulos parecen duplicados: iguales normalizados, uno
+    contenido en el otro (>=4 chars), o solape de tokens (Jaccard >= 0.6)."""
+    na, nb = _normalize_title(a), _normalize_title(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    if len(na) >= 4 and len(nb) >= 4 and (na in nb or nb in na):
+        return True
+    ta, tb = set(na.split()), set(nb.split())
+    if not ta or not tb:
+        return False
+    inter = len(ta & tb)
+    union = len(ta | tb)
+    return inter / union >= 0.6
+
+
+def _cluster_similar(items: list, key: str, kind: str) -> list:
+    """Agrupa items cuyo `key` es similar. Devuelve solo grupos de 2+."""
+    groups = []
+    used = set()
+    for i in range(len(items)):
+        if i in used:
+            continue
+        cluster = [items[i]]
+        used.add(i)
+        for j in range(i + 1, len(items)):
+            if j in used:
+                continue
+            if _titles_similar(items[i][key], items[j][key]):
+                cluster.append(items[j])
+                used.add(j)
+        if len(cluster) >= 2:
+            groups.append(
+                [{"kind": kind, "id": it["id"], "label": it[key]} for it in cluster]
+            )
+    return groups
+
+
+def find_duplicate_groups() -> list:
+    """Busca posibles duplicados entre tareas pendientes y eventos puntuales
+    pendientes. Devuelve una lista de grupos; cada grupo es una lista de
+    dicts {kind, id, label}."""
+    groups = []
+    tasks = list_tasks(include_done=False)
+    groups.extend(_cluster_similar(tasks, key="text", kind="task"))
+    with db.connect() as conn:
+        evs = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, title FROM events "
+                "WHERE done = 0 AND recurring_rule IS NULL"
+            ).fetchall()
+        ]
+    groups.extend(_cluster_similar(evs, key="title", kind="event"))
+    return groups
 
 
 def complete_task(task_id: int) -> dict:

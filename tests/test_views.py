@@ -808,3 +808,22 @@ def test_render_rachas_view_streak_and_percentages(monkeypatch):
     assert "30d:" in text
     assert "🟢" in text and "🟡" in text and "🔴" in text
     assert keyboard is None
+
+
+def test_render_duplicados_view_none():
+    with db.connect() as conn:
+        text, keyboard = views.render_duplicados_view(conn)
+    assert "No veo duplicados" in text
+    assert keyboard is None
+
+
+def test_render_duplicados_view_lists_groups_with_delete_buttons():
+    t1 = tools.add_task("Comprar pan")
+    t2 = tools.add_task("comprar PAN")
+    with db.connect() as conn:
+        text, keyboard = views.render_duplicados_view(conn)
+    assert "POSIBLES DUPLICADOS" in text
+    assert "Comprar pan" in text
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"xT:{t1['id']}:D" in datas
+    assert f"xT:{t2['id']}:D" in datas

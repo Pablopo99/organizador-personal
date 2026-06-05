@@ -472,6 +472,30 @@ def render_rachas_view(
     return header + "\n".join(lines), None
 
 
+def render_duplicados_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /duplicados: grupos de tareas/eventos pendientes con título
+    parecido. Cada ítem lleva un botón 🗑️ para borrarlo (vista D)."""
+    import tools
+
+    header = _render_level_header(conn)
+    groups = tools.find_duplicate_groups()
+    if not groups:
+        return header + "No veo duplicados 👍", None
+
+    lines = ["🔍 <b>POSIBLES DUPLICADOS</b>"]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for gi, group in enumerate(groups, 1):
+        labels = " / ".join(g["label"] for g in group)
+        lines.append(f"\n{gi}. {labels}")
+        for g in group:
+            action = "xT" if g["kind"] == "task" else "xE"
+            buttons.append([InlineKeyboardButton(
+                f"🗑️ {g['label']}", callback_data=f"{action}:{g['id']}:D"
+            )])
+
+    return header + "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+
 def render_metrics_view(
     today: date, conn
 ) -> tuple[str, Optional[InlineKeyboardMarkup]]:
