@@ -266,8 +266,11 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     return text, InlineKeyboardMarkup(buttons)
 
 
-def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
-    """Vista de /semana: 4 secciones, botones solo en objetivos."""
+def render_week_view(
+    today: date, conn, show_completed: bool = False
+) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+    """Vista de /semana. Completado colapsado por defecto (igual que /hoy):
+    botón 'Ver completados' lo despliega y entonces cada ítem lleva su toggle."""
     from datetime import timedelta
 
     from date_utils import monday_of_week
@@ -339,7 +342,11 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             lines.append(base)
         sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
 
-    if week_done or task_done_week or done_objectives:
+    has_completed = bool(week_done or task_done_week or done_objectives)
+    completed_count = len(week_done) + len(task_done_week) + len(done_objectives)
+    view_letter = "Wc" if show_completed else "W"
+
+    if show_completed and has_completed:
         lines = []
         for e in week_done:
             dt = datetime.fromisoformat(e["datetime"])
@@ -351,20 +358,44 @@ def render_week_view(today: date, conn) -> tuple[str, Optional[InlineKeyboardMar
             lines.append(f"• <s>{t['text']}</s>")
         sections.append("🏆 <b>COMPLETADO</b>\n" + "\n".join(lines))
 
-    if not sections:
+    if not sections and not has_completed:
         return header + "Semana tranquila 💆", None
 
-    text = header + "\n\n".join(sections)
+    if sections:
+        text = header + "\n\n".join(sections)
+    else:
+        # Todo hecho y completado colapsado: mensaje breve + botón para verlo.
+        text = header + "Todo completado esta semana 🎉"
 
     buttons: list[list[InlineKeyboardButton]] = []
     for o in pending_objectives:
         buttons.append([InlineKeyboardButton(
-            f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:W"
+            f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:{view_letter}"
         )])
-    for o in done_objectives:
-        buttons.append([InlineKeyboardButton(
-            f"✅ {o['text']}", callback_data=f"uO:{o['id']}:W"
-        )])
+
+    if show_completed:
+        for e in week_done:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {e['title']}", callback_data=f"uE:{e['id']}:{view_letter}"
+            )])
+        for o in done_objectives:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {o['text']}", callback_data=f"uO:{o['id']}:{view_letter}"
+            )])
+        for t in task_done_week:
+            buttons.append([InlineKeyboardButton(
+                f"✅ {t['text']}", callback_data=f"uT:{t['id']}:{view_letter}"
+            )])
+
+    if has_completed:
+        if show_completed:
+            buttons.append([InlineKeyboardButton(
+                "▲ Ocultar completados", callback_data="tg:0:W"
+            )])
+        else:
+            buttons.append([InlineKeyboardButton(
+                f"🏆 Ver completados ({completed_count})", callback_data="tg:0:Wc"
+            )])
 
     keyboard = InlineKeyboardMarkup(buttons) if buttons else None
     return text, keyboard

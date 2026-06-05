@@ -536,8 +536,10 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
     with db.connect() as conn:
         if view_letter == "P":
             text, keyboard = views.render_pending_view(conn)
+        elif view_letter == "Wc":
+            text, keyboard = views.render_week_view(today, conn, show_completed=True)
         elif view_letter == "W":
-            text, keyboard = views.render_week_view(today, conn)
+            text, keyboard = views.render_week_view(today, conn, show_completed=False)
         elif view_letter == "O":
             text, keyboard = views.render_objectives_view(today, conn)
         elif view_letter == "Hc":

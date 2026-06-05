@@ -220,6 +220,12 @@ def _render_week(today=None):
         return views.render_week_view(today, conn)
 
 
+def _render_week_completed(today=None):
+    today = today or date(2026, 5, 18)
+    with db.connect() as conn:
+        return views.render_week_view(today, conn, show_completed=True)
+
+
 def test_render_week_view_empty_returns_semana_tranquila():
     text, keyboard = _render_week()
     assert "Semana tranquila" in text
@@ -256,20 +262,39 @@ def test_render_week_view_groups_events_by_weekday():
     assert "• Jue " not in text
 
 
-def test_render_week_view_completado_con_evento_done_renderiza(monkeypatch):
-    """Regression: un evento marcado done debe renderizar en COMPLETADO
-    sin crashear. Antes usaba la variable weekdays_es que ya no existía,
-    y el comando /semana petaba con NameError en producción."""
+def test_render_week_view_completado_oculto_por_defecto_con_boton(monkeypatch):
+    """Por defecto la sección COMPLETADO NO se muestra; en su lugar hay un
+    botón 'Ver completados (N)' (vista Wc). Igual que /hoy."""
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     ev = tools.add_event("Reunión cliente", "2026-05-19T10:00:00", "work")
     tools.mark_event_done(ev["id"])
 
-    text, _ = _render_week(today=date(2026, 5, 18))
+    text, keyboard = _render_week(today=date(2026, 5, 18))
+
+    assert "COMPLETADO" not in text
+    assert "Reunión cliente" not in text
+    assert keyboard is not None
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    texts = [row[0].text for row in keyboard.inline_keyboard]
+    assert "tg:0:Wc" in datas
+    assert any("Ver completados" in t for t in texts)
+
+
+def test_render_week_view_completado_expandido_renderiza(monkeypatch):
+    """Regression: con show_completed un evento done renderiza en COMPLETADO
+    sin crashear (antes petaba con NameError weekdays_es)."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    ev = tools.add_event("Reunión cliente", "2026-05-19T10:00:00", "work")
+    tools.mark_event_done(ev["id"])
+
+    text, keyboard = _render_week_completed(today=date(2026, 5, 18))
 
     assert "COMPLETADO" in text
     assert "Reunión cliente" in text
-    # Encabezado de día con nombre completo
-    assert "Martes" in text
+    assert "Martes" in text  # encabezado de día con nombre completo
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"uE:{ev['id']}:Wc" in datas  # toggle por ítem al expandir
+    assert "tg:0:W" in datas  # botón ocultar
 
 
 def test_render_week_view_only_objective_has_button():
@@ -294,33 +319,32 @@ def test_render_week_view_only_objective_has_button():
 
 
 def test_render_week_view_done_objective_appears_in_completado_tachado(monkeypatch):
-    """Un objetivo hecho aparece en COMPLETADO tachado, NO en OBJETIVOS."""
+    """Un objetivo hecho aparece en COMPLETADO tachado (al expandir), NO en OBJETIVOS."""
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     o = tools.add_objective("Subir vídeos", "2026-05-18")
     tools.mark_objective_done(o["id"])
 
-    text, keyboard = _render_week()
+    text, keyboard = _render_week_completed()
 
     assert "COMPLETADO" in text
     assert "<s>Subir vídeos</s>" in text
     # No aparece en sección OBJETIVOS (que se omite porque no hay pendientes)
     assert "OBJETIVOS" not in text
 
-    # Botón ✅ presente para deshacer
+    # Botón ✅ presente para deshacer (vista Wc)
     assert keyboard is not None
-    btn = keyboard.inline_keyboard[0][0]
-    assert btn.text == "✅ Subir vídeos"
-    assert btn.callback_data == f"uO:{o['id']}:W"
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"uO:{o['id']}:Wc" in datas
 
 
 def test_render_week_view_pending_in_objectives_done_in_completado(monkeypatch):
-    """Pendiente en OBJETIVOS, hecho en COMPLETADO. Ambos con botón."""
+    """Al expandir: pendiente en OBJETIVOS, hecho en COMPLETADO. Ambos con botón."""
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     o1 = tools.add_objective("Pendiente", "2026-05-18")
     o2 = tools.add_objective("Hecho", "2026-05-18")
     tools.mark_objective_done(o2["id"])
 
-    text, keyboard = _render_week()
+    text, keyboard = _render_week_completed()
 
     assert "OBJETIVOS" in text
     assert "• Pendiente" in text
@@ -330,11 +354,13 @@ def test_render_week_view_pending_in_objectives_done_in_completado(monkeypatch):
 
     assert keyboard is not None
     datas = [row[0].callback_data for row in keyboard.inline_keyboard]
-    assert f"mO:{o1['id']}:W" in datas
-    assert f"uO:{o2['id']}:W" in datas
+    assert f"mO:{o1['id']}:Wc" in datas
+    assert f"uO:{o2['id']}:Wc" in datas
 
 
-def test_render_week_view_completed_task_in_completado_section_without_button(monkeypatch):
+def test_render_week_view_completed_task_in_completado_with_toggle(monkeypatch):
+    """Al expandir COMPLETADO, una tarea hecha sale tachada y con su botón ✅
+    para desmarcarla (vista Wc)."""
     import date_utils
     monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
     t = tools.add_task("Comprar pan")
@@ -344,14 +370,12 @@ def test_render_week_view_completed_task_in_completado_section_without_button(mo
             ("2026-05-19T10:00:00", t["id"]),
         )
 
-    text, keyboard = _render_week()
+    text, keyboard = _render_week_completed()
 
     assert "COMPLETADO" in text
     assert "<s>Comprar pan</s>" in text
-    if keyboard is not None:
-        for row in keyboard.inline_keyboard:
-            for btn in row:
-                assert "Comprar pan" not in btn.text
+    datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+    assert f"uT:{t['id']}:Wc" in datas
 
 
 def test_render_week_view_objectives_filtered_by_current_week():
