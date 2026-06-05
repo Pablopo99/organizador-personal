@@ -653,3 +653,32 @@ async def test_on_message_sends_immediate_reminders(monkeypatch):
     sends = [c.kwargs["text"] for c in ctx.bot.send_message.call_args_list]
     matches = [t for t in sends if "Dentista" in t and "30 min" in t]
     assert len(matches) == 1
+
+
+@pytest.mark.asyncio
+async def test_on_start_sends_welcome(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 42
+
+    await bot._on_start(update, MagicMock())
+
+    reply_mock.assert_called_once()
+    text = reply_mock.call_args.args[0] if reply_mock.call_args.args else reply_mock.call_args.kwargs.get("text")
+    assert "secretaria" in text.lower()
+    assert "/hoy" in text
+
+
+@pytest.mark.asyncio
+async def test_on_start_unauthorized_ignored(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 999
+
+    await bot._on_start(update, MagicMock())
+
+    reply_mock.assert_not_called()

@@ -21,7 +21,7 @@ import db
 import tools
 import transcriber
 import views
-from config import ALLOWED_USER_ID, TELEGRAM_TOKEN
+from config import ALLOWED_USER_ID, TELEGRAM_TOKEN, USER_NAME
 from formatting import markdown_to_html
 
 logging.basicConfig(
@@ -225,6 +225,43 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Error enviando recordatorio inmediato del evento %s",
                 rem["event_id"],
             )
+
+
+_WELCOME_TEXT = (
+    "👋 ¡Hola {name}! Soy tu secretaria personal. Te ayudo a organizar "
+    "<b>eventos</b>, <b>tareas</b>, <b>objetivos de la semana</b> y <b>rutinas</b>.\n\n"
+    "Háblame con naturalidad, por ejemplo:\n"
+    "• «mañana a las 5 tengo dentista, avísame 30 min antes»\n"
+    "• «apúntame comprar pan para hoy»\n"
+    "• «ya hice la reunión»\n"
+    "• «¿qué tengo hoy?»\n\n"
+    "También puedes mandarme un <b>audio</b> y lo entiendo.\n\n"
+    "Comandos rápidos:\n"
+    "📅 /hoy · /manana · /semana\n"
+    "📝 /pendientes · 🎯 /objetivos\n"
+    "🔥 /rachas · 🏆 /nivel · 📊 /metricas\n"
+    "🔍 /duplicados · 🔄 /nueva (reinicia la conversación)\n\n"
+    "Escribe /ayuda para volver a ver esto cuando quieras."
+)
+
+
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Error handler global: loguea cualquier excepción no capturada en handlers
+    para tener visibilidad (antes quedaban en el logger de asyncio sin contexto)."""
+    log.exception("Excepción no capturada en un handler", exc_info=context.error)
+
+
+async def _on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """/start y /ayuda: mensaje de bienvenida con qué puede hacer el bot."""
+    if not update.message or not update.effective_user:
+        return
+    if update.effective_user.id != ALLOWED_USER_ID:
+        log.warning("/start ignorado de user_id no autorizado: %s", update.effective_user.id)
+        return
+    await update.message.reply_text(
+        _WELCOME_TEXT.format(name=USER_NAME),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def _on_hoy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -586,17 +623,6 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
 
-def _make_slash_handler(command: str):
-    """Factory: crea un handler async para un comando slash conocido."""
-    async def handler(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message or not update.effective_user:
-            return
-        reply = process_slash_command(command, from_user_id=update.effective_user.id)
-        if reply is not None:
-            await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
-    return handler
-
-
 async def _set_bot_commands(application: Application) -> None:
     """Registra el menú de comandos visible al escribir '/' en Telegram.
 
@@ -613,6 +639,7 @@ async def _set_bot_commands(application: Application) -> None:
         BotCommand("duplicados", "Revisar duplicados"),
         BotCommand("metricas", "Métricas de cumplimiento"),
         BotCommand("nivel", "Tu nivel y XP"),
+        BotCommand("ayuda", "Qué puedo hacer"),
         BotCommand("nueva", "Reiniciar conversación"),
     ]
     try:
@@ -640,6 +667,8 @@ async def _async_main() -> None:
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
+    app.add_handler(CommandHandler("start", _on_start))
+    app.add_handler(CommandHandler("ayuda", _on_start))
     app.add_handler(CommandHandler("hoy", _on_hoy))
     app.add_handler(CommandHandler("manana", _on_manana))
     app.add_handler(CommandHandler("pendientes", _on_pendientes))
@@ -653,6 +682,7 @@ async def _async_main() -> None:
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
     app.add_handler(CallbackQueryHandler(_on_callback_query))
+    app.add_error_handler(_on_error)
 
     madrid = pytz.timezone("Europe/Madrid")
     app.job_queue.run_daily(

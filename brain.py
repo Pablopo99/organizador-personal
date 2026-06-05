@@ -6,7 +6,7 @@ import anthropic
 
 import db
 import tools
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TIMEZONE
+from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TIMEZONE, USER_NAME
 
 log = logging.getLogger(__name__)
 
@@ -77,8 +77,11 @@ def reset_calendar_button(user_id: int) -> None:
 def _system_prompt() -> str:
     """Parte ESTÁTICA del system prompt (sin fecha/hora, que cambia cada
     minuto y rompería el prompt caching). La fecha/hora actual se añade como
-    un bloque de sistema aparte en handle_message."""
-    return f"""Eres el coach personal de organización de Pablo, un usuario hispanohablante.
+    un bloque de sistema aparte en handle_message.
+
+    El nombre del usuario es configurable (USER_NAME); por defecto 'Pablo'.
+    Se sustituye al final para personalizar el tono sin tocar el texto."""
+    prompt = f"""Eres el coach personal de organización de Pablo, un usuario hispanohablante.
 
 Contexto:
 - Zona horaria: {TIMEZONE}
@@ -178,6 +181,9 @@ CÓMO IDENTIFICAR LO COMPLETADO:
 - "Completado hoy" para RUTINAS: instancias recurrentes devueltas por query_events para hoy cuyo done=1. (Mecánica interna: hay una fila en routine_completions para esa fecha; tú solo lees done.)
 
 Puedes llamar varias herramientas en un mismo turno si la petición lo requiere. Si una herramienta devuelve error, explícalo con palabras claras y propón una alternativa."""
+    if USER_NAME != "Pablo":
+        prompt = prompt.replace("Pablo", USER_NAME)
+    return prompt
 
 
 def reset_history(user_id: int) -> None:

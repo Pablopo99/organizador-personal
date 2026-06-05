@@ -40,10 +40,10 @@ Telegram ─► bot.py ─► brain.py ─► tools.py ─► db.py ─► SQLit
 ```
 
 - **`bot.py`** — Telegram listener. Auth-gates every entry point with `ALLOWED_USER_ID`. Routes:
-  - Slash commands `/semana`, `/objetivos`, `/rachas` → `_SLASH_PROMPTS` dict → `brain.handle_message` (Claude does the work).
-  - Slash command `/hoy` → dedicated `_on_hoy` handler that calls `views.render_today_view` directly (bypasses Claude for instant tap response). Same pattern likely for `/pendientes` and `/semana` over time.
+  - **Todos los slash commands son deterministas** (handlers directos, sin Claude): `/hoy`, `/manana`, `/pendientes`, `/semana`, `/objetivos`, `/rachas`, `/metricas`, `/nivel`, `/duplicados` llaman a su `render_*_view` en `views.py`. `/start` y `/ayuda` → `_on_start` (bienvenida). `_SLASH_PROMPTS` quedó vacío (era el mecanismo viejo de delegar a Claude). Respuesta instantánea y sin coste de API.
   - Free text and voice → `brain.handle_message` (Claude with tool use).
-  - Button taps → `_on_callback_query`. Callback data format `{action}{type}:{id}[:{view}]` (e.g. `mE:42`, `mR:5`, `uT:7`). View letter (H/P/W) selects which render function re-paints the message; default H for backward compatibility with old messages.
+  - Button taps → `_on_callback_query`. Callback data format `{action}{type}:{id}[:{view}]` (e.g. `mE:42`, `mR:5`, `uT:7`, `xT:7:D` borrar). View letter (H/Hc/P/W/Wc/O/D) selecciona qué render repinta el mensaje; default H.
+  - `app.add_error_handler(_on_error)` loguea excepciones no capturadas.
 
 - **`brain.py`** — Claude tool-use loop. One `_history` dict per `user_id` (in-memory, lost on restart). The system prompt is the source of truth for tone, formatting rules (HTML for Telegram), section templates and the strict rules for slash-command summaries.
 

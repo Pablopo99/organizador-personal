@@ -6,7 +6,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 import db
-from config import ALLOWED_USER_ID
+from config import ALLOWED_USER_ID, USER_NAME
 
 log = logging.getLogger("scheduler")
 
@@ -31,7 +31,7 @@ async def morning_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
     today = date_utils.today_madrid()
     weekday = _WEEKDAYS_ES[today.weekday()]
     date_str = f"{today.day} {_ES_MONTHS[today.month - 1]}"
-    greeting = f"Buenos días Pablo 🌅 — <b>{weekday}, {date_str}</b>\n\n"
+    greeting = f"Buenos días {USER_NAME} 🌅 — <b>{weekday}, {date_str}</b>\n\n"
 
     weekly_block = ""
     if today.weekday() == 0:

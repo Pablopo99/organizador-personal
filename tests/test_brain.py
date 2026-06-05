@@ -233,3 +233,16 @@ def test_record_and_pop_immediate_reminders():
 def test_pop_immediate_reminders_unknown_user_returns_empty():
     import brain
     assert brain.pop_immediate_reminders(99999) == []
+
+
+def test_system_prompt_personalizes_user_name(monkeypatch):
+    monkeypatch.setattr(brain, "USER_NAME", "Ana")
+    prompt = brain._system_prompt()
+    assert "Ana" in prompt
+    assert "Pablo" not in prompt
+
+
+def test_system_prompt_default_name_pablo(monkeypatch):
+    monkeypatch.setattr(brain, "USER_NAME", "Pablo")
+    prompt = brain._system_prompt()
+    assert "Pablo" in prompt

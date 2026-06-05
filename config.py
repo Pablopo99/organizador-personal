@@ -37,6 +37,10 @@ GOOGLE_REDIRECT_URI = os.environ.get(
     "https://mi-secretaria-pablo.fly.dev/oauth/callback",
 )
 
+# Nombre del usuario (para personalizar el tono del bot y el saludo matutino).
+# Por defecto "Pablo"; cada persona que despliegue su copia puede ponerlo en su .env.
+USER_NAME = os.environ.get("USER_NAME", "Pablo")
+
 TIMEZONE = "Europe/Madrid"
 DB_PATH = os.environ.get("DB_PATH") or str(_PROJECT_ROOT / "organizador.db")
 CATEGORIES = ("medical", "work", "personal", "other")
