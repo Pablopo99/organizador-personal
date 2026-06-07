@@ -13,7 +13,11 @@ log = logging.getLogger(__name__)
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 _MAX_TOOL_TURNS = 8
-_MAX_TURNS_IN_HISTORY = 15
+# Recortado de 15 → 8 turnos para reducir tokens por llamada y bajar la
+# probabilidad de chocar con el rate limit de Anthropic (Tier 1 = 30k ITPM).
+# Con system+tools cacheados (~4.6k tokens), cada turno de historial añade
+# ~200-400 tokens; 8 turnos ≈ ~3k tokens de historial vs ~6k antes.
+_MAX_TURNS_IN_HISTORY = 8
 
 # Historial conversacional por usuario. En memoria — se pierde al reiniciar el bot.
 _history: dict[int, list[dict]] = {}

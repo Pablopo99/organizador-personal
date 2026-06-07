@@ -15,6 +15,8 @@ from telegram.ext import (
     filters,
 )
 
+import anthropic
+
 import brain
 import date_utils
 import db
@@ -23,6 +25,11 @@ import transcriber
 import views
 from config import ALLOWED_USER_ID, TELEGRAM_TOKEN, USER_NAME
 from formatting import markdown_to_html
+
+_RATE_LIMIT_MSG = (
+    "⏳ He alcanzado el límite de la API de Anthropic por un instante. "
+    "Espera ~1 minuto y reenvíame el mensaje."
+)
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -52,6 +59,9 @@ def process_slash_command(command: str, from_user_id: int) -> Optional[str]:
         return None
     try:
         return markdown_to_html(brain.handle_message(prompt, user_id=from_user_id))
+    except anthropic.RateLimitError:
+        log.warning("Rate limit de Anthropic alcanzado en %s", cmd)
+        return _RATE_LIMIT_MSG
     except Exception:
         log.exception("Error procesando comando %s", cmd)
         return (
@@ -77,6 +87,9 @@ def process_incoming(text: str, from_user_id: int) -> Optional[str]:
 
     try:
         return markdown_to_html(brain.handle_message(text, user_id=from_user_id))
+    except anthropic.RateLimitError:
+        log.warning("Rate limit de Anthropic alcanzado en mensaje libre")
+        return _RATE_LIMIT_MSG
     except Exception:
         log.exception("Error procesando mensaje")
         return (
@@ -97,6 +110,9 @@ def process_voice_transcription(transcription: str, from_user_id: int) -> Option
 
     try:
         return markdown_to_html(brain.handle_message(cleaned, user_id=from_user_id))
+    except anthropic.RateLimitError:
+        log.warning("Rate limit de Anthropic alcanzado en voz")
+        return _RATE_LIMIT_MSG
     except Exception:
         log.exception("Error procesando transcripción de voz")
         return (

@@ -1,8 +1,20 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anthropic
+import httpx
 import pytest
 
 import bot
+
+
+def _rate_limit_error() -> anthropic.RateLimitError:
+    """Construye un RateLimitError tal como lo lanza el SDK tras agotar reintentos."""
+    response = httpx.Response(429, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    return anthropic.RateLimitError(
+        message="rate_limit_error",
+        response=response,
+        body={"error": {"type": "rate_limit_error"}},
+    )
 
 
 def test_handle_unauthorized_user_returns_none():
@@ -29,6 +41,55 @@ def test_handle_brain_exception_returns_friendly_message(monkeypatch):
     monkeypatch.setattr(bot.brain, "handle_message", explode)
     reply = bot.process_incoming(text="hola", from_user_id=42)
     assert "no puedo procesar" in reply.lower()
+
+
+def test_handle_rate_limit_error_returns_specific_message(monkeypatch):
+    """Cuando Anthropic devuelve 429 (rate limit), el bot debe explicar que es
+    un límite temporal y pedir reintento en ~1 minuto. NO el mensaje genérico
+    'no puedo procesar' que es confuso."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def rate_limited(_, user_id=0):
+        raise _rate_limit_error()
+
+    monkeypatch.setattr(bot.brain, "handle_message", rate_limited)
+    reply = bot.process_incoming(text="hola", from_user_id=42)
+    low = reply.lower()
+    assert "límite" in low or "saturado" in low or "demasiados" in low, (
+        f"esperaba mención de límite/saturación, got: {reply}"
+    )
+    assert "minuto" in low or "segundos" in low or "espera" in low, (
+        f"esperaba indicación de cuánto esperar, got: {reply}"
+    )
+
+
+def test_voice_rate_limit_error_returns_specific_message(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+
+    def rate_limited(_, user_id=0):
+        raise _rate_limit_error()
+
+    monkeypatch.setattr(bot.brain, "handle_message", rate_limited)
+    reply = bot.process_voice_transcription("hola", from_user_id=42)
+    low = reply.lower()
+    assert "límite" in low or "saturado" in low or "demasiados" in low
+    assert "minuto" in low or "segundos" in low or "espera" in low
+
+
+def test_slash_rate_limit_error_returns_specific_message(monkeypatch):
+    """Aunque hoy _SLASH_PROMPTS está vacío, dejamos el camino blindado por si
+    se vuelve a enchufar algún slash al brain."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(bot, "_SLASH_PROMPTS", {"/foo": "qué hay de foo"})
+
+    def rate_limited(_, user_id=0):
+        raise _rate_limit_error()
+
+    monkeypatch.setattr(bot.brain, "handle_message", rate_limited)
+    reply = bot.process_slash_command("/foo", from_user_id=42)
+    low = reply.lower()
+    assert "límite" in low or "saturado" in low or "demasiados" in low
+    assert "minuto" in low or "segundos" in low or "espera" in low
 
 
 def test_nueva_command_resets_history(monkeypatch):
