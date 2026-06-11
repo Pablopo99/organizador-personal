@@ -78,3 +78,8 @@ def test_delete_task_dispatches_to_helper(monkeypatch):
     result = tools.dispatch("delete_task", {"task_id": 42})
     assert called["id"] == 42
     assert result["deleted"] == 1
+
+
+def test_delete_objective_registered():
+    names = [t["name"] for t in tools.TOOL_DEFINITIONS]
+    assert "delete_objective" in names

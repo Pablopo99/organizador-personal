@@ -148,3 +148,15 @@ def test_unmark_objective_done_reverses_xp(monkeypatch):
     assert tools._get_xp_total() == 50
     tools.unmark_objective_done(o["id"])
     assert tools._get_xp_total() == 0
+
+
+def test_delete_objective_existing():
+    o = tools.add_objective("Leer 2 libros", "2026-06-08")
+    result = tools.delete_objective(o["id"])
+    assert result["deleted"] == 1
+    assert tools.query_objectives(None) == []
+
+
+def test_delete_objective_not_found():
+    result = tools.delete_objective(99999)
+    assert result["deleted"] == 0

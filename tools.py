@@ -1147,6 +1147,16 @@ def mark_objective_done(objective_id: int) -> dict:
     }
 
 
+def delete_objective(objective_id: int) -> dict:
+    """Borra un objetivo por id. No revierte XP si ya estaba marcado hecho:
+    el log XP es append-only y conserva el historial igual que con tareas."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM objectives WHERE id = ?", (objective_id,)
+        )
+    return {"id": objective_id, "deleted": cur.rowcount}
+
+
 def unmark_objective_done(objective_id: int) -> dict:
     """Desmarca un objetivo y revierte XP."""
     with db.connect() as conn:
@@ -1598,6 +1608,18 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "delete_objective",
+        "description": (
+            "Borra un objetivo semanal por su id. Confirmar con el usuario "
+            "antes mostrando el texto a borrar."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"objective_id": {"type": "integer"}},
+            "required": ["objective_id"],
+        },
+    },
+    {
         "name": "mark_objective_done",
         "description": "Marca un objetivo como completado.",
         "input_schema": {
@@ -1710,6 +1732,7 @@ _DISPATCH = {
     "add_objective": add_objective,
     "query_objectives": query_objectives,
     "mark_objective_done": mark_objective_done,
+    "delete_objective": delete_objective,
     "add_task": add_task,
     "list_tasks": list_tasks,
     "complete_task": complete_task,
