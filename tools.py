@@ -1147,6 +1147,31 @@ def mark_objective_done(objective_id: int) -> dict:
     }
 
 
+def update_objective(objective_id: int, fields: dict) -> dict:
+    """Actualiza campos parciales de un objetivo. week_start se normaliza
+    al lunes de la semana indicada (igual que add_objective)."""
+    from date_utils import monday_of_week
+    allowed = {"text", "week_start"}
+    sets = []
+    params: list = []
+    for key, value in fields.items():
+        if key not in allowed:
+            raise ValueError(f"campo no actualizable: {key}")
+        if key == "week_start":
+            parsed = date.fromisoformat(value)
+            value = monday_of_week(parsed).isoformat()
+        sets.append(f"{key} = ?")
+        params.append(value)
+    if not sets:
+        return {"id": objective_id, "updated": 0}
+    params.append(objective_id)
+    with db.connect() as conn:
+        cur = conn.execute(
+            f"UPDATE objectives SET {', '.join(sets)} WHERE id = ?", params
+        )
+    return {"id": objective_id, "updated": cur.rowcount}
+
+
 def delete_objective(objective_id: int) -> dict:
     """Borra un objetivo por id. No revierte XP si ya estaba marcado hecho:
     el log XP es append-only y conserva el historial igual que con tareas."""
@@ -1619,6 +1644,28 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "update_objective",
+        "description": (
+            "Modifica campos de un objetivo. fields={text?, week_start?}. "
+            "Solo incluye las claves que cambien. week_start se normaliza al "
+            "lunes de esa semana."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "objective_id": {"type": "integer"},
+                "fields": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "week_start": {"type": "string"},
+                    },
+                },
+            },
+            "required": ["objective_id", "fields"],
+        },
+    },
+    {
         "name": "query_objectives",
         "description": "Lista objetivos. Si week_start es null, devuelve todos.",
         "input_schema": {
@@ -1774,6 +1821,7 @@ _DISPATCH = {
     "add_event_reminder": add_event_reminder,
     "routine_summary": routine_summary,
     "add_objective": add_objective,
+    "update_objective": update_objective,
     "query_objectives": query_objectives,
     "mark_objective_done": mark_objective_done,
     "delete_objective": delete_objective,

@@ -160,3 +160,40 @@ def test_delete_objective_existing():
 def test_delete_objective_not_found():
     result = tools.delete_objective(99999)
     assert result["deleted"] == 0
+
+
+def test_update_objective_text_only():
+    o = tools.add_objective("Leer 2 libros", "2026-06-08")
+    result = tools.update_objective(o["id"], {"text": "Leer 3 libros"})
+    assert result["updated"] == 1
+    rows = tools.query_objectives(None)
+    row = next(r for r in rows if r["id"] == o["id"])
+    assert row["text"] == "Leer 3 libros"
+    assert row["week_start"] == "2026-06-08"
+
+
+def test_update_objective_week_start_normalizes_to_monday():
+    o = tools.add_objective("Meditar", "2026-06-08")
+    # mueve a un miércoles → debe normalizar a su lunes (2026-06-15)
+    result = tools.update_objective(o["id"], {"week_start": "2026-06-17"})
+    assert result["updated"] == 1
+    rows = tools.query_objectives(None)
+    row = next(r for r in rows if r["id"] == o["id"])
+    assert row["week_start"] == "2026-06-15"
+
+
+def test_update_objective_empty_fields_is_noop():
+    o = tools.add_objective("Meditar", "2026-06-08")
+    result = tools.update_objective(o["id"], {})
+    assert result["updated"] == 0
+
+
+def test_update_objective_not_found():
+    result = tools.update_objective(99999, {"text": "X"})
+    assert result["updated"] == 0
+
+
+def test_update_objective_invalid_field_raises():
+    o = tools.add_objective("Meditar", "2026-06-08")
+    with pytest.raises(ValueError):
+        tools.update_objective(o["id"], {"done": 1})

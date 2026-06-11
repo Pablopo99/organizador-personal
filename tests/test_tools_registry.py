@@ -88,3 +88,8 @@ def test_delete_objective_registered():
 def test_update_task_registered():
     names = [t["name"] for t in tools.TOOL_DEFINITIONS]
     assert "update_task" in names
+
+
+def test_update_objective_registered():
+    names = [t["name"] for t in tools.TOOL_DEFINITIONS]
+    assert "update_objective" in names
