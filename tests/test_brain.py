@@ -246,3 +246,21 @@ def test_system_prompt_default_name_pablo(monkeypatch):
     monkeypatch.setattr(brain, "USER_NAME", "Pablo")
     prompt = brain._system_prompt()
     assert "Pablo" in prompt
+
+
+def test_system_prompt_mentions_delete_task_and_objective():
+    prompt = brain._system_prompt()
+    assert "delete_task" in prompt
+    assert "delete_objective" in prompt
+
+
+def test_system_prompt_mentions_update_task_and_objective():
+    prompt = brain._system_prompt()
+    assert "update_task" in prompt
+    assert "update_objective" in prompt
+
+
+def test_system_prompt_mentions_semana_que_viene_mapping():
+    """Claude tiene que saber traducir 'la que viene' → próximo lunes."""
+    prompt = brain._system_prompt().lower()
+    assert "la que viene" in prompt or "próxima semana" in prompt
