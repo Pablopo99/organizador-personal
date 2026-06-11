@@ -1644,6 +1644,18 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "delete_task",
+        "description": (
+            "Borra una tarea por su id. Confirmar con el usuario antes "
+            "mostrando el texto a borrar."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "integer"}},
+            "required": ["task_id"],
+        },
+    },
+    {
         "name": "push_event_to_calendar",
         "description": (
             "Sincroniza un evento existente con Google Calendar. Úsala cuando "
@@ -1701,6 +1713,7 @@ _DISPATCH = {
     "add_task": add_task,
     "list_tasks": list_tasks,
     "complete_task": complete_task,
+    "delete_task": delete_task,
     "push_event_to_calendar": push_event_to_calendar,
     "connect_calendar": connect_calendar,
     "metrics_summary": metrics_summary,

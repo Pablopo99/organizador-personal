@@ -60,3 +60,21 @@ def test_tool_definitions_include_calendar_tools():
     names = [t["name"] for t in tools.TOOL_DEFINITIONS]
     assert "push_event_to_calendar" in names
     assert "connect_calendar" in names
+
+
+def test_delete_task_registered():
+    names = [t["name"] for t in tools.TOOL_DEFINITIONS]
+    assert "delete_task" in names
+
+
+def test_delete_task_dispatches_to_helper(monkeypatch):
+    called = {}
+    def fake(task_id):
+        called["id"] = task_id
+        return {"id": task_id, "deleted": 1}
+    monkeypatch.setattr(tools, "delete_task", fake)
+    # _DISPATCH guarda referencia capturada en módulo; reconstruir entrada
+    monkeypatch.setitem(tools._DISPATCH, "delete_task", fake)
+    result = tools.dispatch("delete_task", {"task_id": 42})
+    assert called["id"] == 42
+    assert result["deleted"] == 1
