@@ -1214,6 +1214,28 @@ def list_tasks(include_done: bool = False) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def update_task(task_id: int, fields: dict) -> dict:
+    """Actualiza campos parciales de una tarea. Patrón coherente con
+    update_event: las claves ausentes no se tocan; due_date=None borra
+    la fecha (la deja sin fecha)."""
+    allowed = {"text", "due_date"}
+    sets = []
+    params: list = []
+    for key, value in fields.items():
+        if key not in allowed:
+            raise ValueError(f"campo no actualizable: {key}")
+        sets.append(f"{key} = ?")
+        params.append(value)
+    if not sets:
+        return {"id": task_id, "updated": 0}
+    params.append(task_id)
+    with db.connect() as conn:
+        cur = conn.execute(
+            f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params
+        )
+    return {"id": task_id, "updated": cur.rowcount}
+
+
 def delete_task(task_id: int) -> dict:
     """Borra una tarea por id. Uso interno (callback de /duplicados)."""
     with db.connect() as conn:
@@ -1629,6 +1651,28 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "update_task",
+        "description": (
+            "Modifica campos de una tarea. fields={text?, due_date?}. "
+            "Solo incluye en fields las claves que cambien. "
+            "due_date=null quita la fecha; omítela para no tocarla."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "fields": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "due_date": {"type": ["string", "null"]},
+                    },
+                },
+            },
+            "required": ["task_id", "fields"],
+        },
+    },
+    {
         "name": "add_task",
         "description": (
             "Añade una tarea. due_date es opcional ('YYYY-MM-DD'); úsala SOLO si "
@@ -1734,6 +1778,7 @@ _DISPATCH = {
     "mark_objective_done": mark_objective_done,
     "delete_objective": delete_objective,
     "add_task": add_task,
+    "update_task": update_task,
     "list_tasks": list_tasks,
     "complete_task": complete_task,
     "delete_task": delete_task,

@@ -232,3 +232,52 @@ def test_uncomplete_task_reverses_xp(monkeypatch):
             "SELECT COUNT(*) FROM xp_log WHERE outcome = 'reversal'"
         ).fetchone()[0]
     assert reversals == 1
+
+
+def test_update_task_text_only():
+    t = tools.add_task("Comprar pan", due_date="2026-06-10")
+    result = tools.update_task(t["id"], {"text": "Comprar pan integral"})
+    assert result["updated"] == 1
+    rows = tools.list_tasks()
+    row = next(r for r in rows if r["id"] == t["id"])
+    assert row["text"] == "Comprar pan integral"
+    assert row["due_date"] == "2026-06-10"
+
+
+def test_update_task_due_date_to_value():
+    t = tools.add_task("Comprar pan")
+    result = tools.update_task(t["id"], {"due_date": "2026-06-15"})
+    assert result["updated"] == 1
+    rows = tools.list_tasks()
+    row = next(r for r in rows if r["id"] == t["id"])
+    assert row["due_date"] == "2026-06-15"
+
+
+def test_update_task_due_date_to_null_clears_date():
+    t = tools.add_task("Comprar pan", due_date="2026-06-10")
+    result = tools.update_task(t["id"], {"due_date": None})
+    assert result["updated"] == 1
+    rows = tools.list_tasks()
+    row = next(r for r in rows if r["id"] == t["id"])
+    assert row["due_date"] is None
+
+
+def test_update_task_empty_fields_is_noop():
+    t = tools.add_task("Comprar pan", due_date="2026-06-10")
+    result = tools.update_task(t["id"], {})
+    assert result["updated"] == 0
+    rows = tools.list_tasks()
+    row = next(r for r in rows if r["id"] == t["id"])
+    assert row["text"] == "Comprar pan"
+    assert row["due_date"] == "2026-06-10"
+
+
+def test_update_task_not_found():
+    result = tools.update_task(99999, {"text": "X"})
+    assert result["updated"] == 0
+
+
+def test_update_task_invalid_field_raises():
+    t = tools.add_task("Comprar pan")
+    with pytest.raises(ValueError):
+        tools.update_task(t["id"], {"done": 1})
