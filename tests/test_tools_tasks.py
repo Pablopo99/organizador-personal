@@ -281,3 +281,18 @@ def test_update_task_invalid_field_raises():
     t = tools.add_task("Comprar pan")
     with pytest.raises(ValueError):
         tools.update_task(t["id"], {"done": 1})
+
+
+def test_update_task_invalid_due_date_format_raises():
+    """due_date debe ser ISO YYYY-MM-DD; un string libre como 'mañana' se
+    guardaba silenciosamente y luego rompía las vistas. Debe lanzar ValueError."""
+    t = tools.add_task("Comprar pan")
+    with pytest.raises(ValueError):
+        tools.update_task(t["id"], {"due_date": "mañana"})
+
+
+def test_update_task_due_date_null_is_still_allowed():
+    """due_date=None (quitar la fecha) NO debe lanzar — sigue siendo válido."""
+    t = tools.add_task("Comprar pan", due_date="2026-06-15")
+    result = tools.update_task(t["id"], {"due_date": None})
+    assert result["updated"] == 1

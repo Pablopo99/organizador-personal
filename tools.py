@@ -1249,6 +1249,9 @@ def update_task(task_id: int, fields: dict) -> dict:
     for key, value in fields.items():
         if key not in allowed:
             raise ValueError(f"campo no actualizable: {key}")
+        if key == "due_date" and value is not None:
+            # Valida formato ISO; date.fromisoformat lanza ValueError si no.
+            date.fromisoformat(value)
         sets.append(f"{key} = ?")
         params.append(value)
     if not sets:
