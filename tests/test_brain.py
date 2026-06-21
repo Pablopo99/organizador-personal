@@ -264,3 +264,14 @@ def test_system_prompt_mentions_semana_que_viene_mapping():
     """Claude tiene que saber traducir 'la que viene' → próximo lunes."""
     prompt = brain._system_prompt().lower()
     assert "la que viene" in prompt or "próxima semana" in prompt
+
+
+def test_system_prompt_size_under_budget():
+    """Regresión: el prompt no debe volver a inflar sin justificación.
+    Tras el recorte de junio 2026 quedó en ~7800 chars. Umbral 8200 da
+    margen para añadir 1-2 reglas futuras sin alerta espuria."""
+    prompt = brain._system_prompt()
+    assert len(prompt) < 8200, (
+        f"system prompt ha crecido a {len(prompt)} chars. "
+        f"Revisa qué añadiste; cada turno cuenta contra el ITPM de Anthropic."
+    )
