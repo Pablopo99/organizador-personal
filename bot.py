@@ -1,5 +1,6 @@
 """Listener de Telegram. Filtra por usuario autorizado y delega en el cerebro."""
 import asyncio
+import html
 import logging
 from typing import Optional
 
@@ -30,6 +31,25 @@ _RATE_LIMIT_MSG = (
     "⏳ He alcanzado el límite de la API de Anthropic por un instante. "
     "Espera ~1 minuto y reenvíame el mensaje."
 )
+
+# Store en memoria para "Deshacer" borrados de /duplicados. Mapea un token
+# entero → snapshot del item borrado (capturado antes de borrar). Se pierde
+# al reiniciar el bot: el deshacer es inmediato, mientras el mensaje exista.
+_undo_store: dict[int, dict] = {}
+_undo_seq = 0
+
+
+def _push_undo(snapshot: dict) -> int:
+    """Guarda un snapshot y devuelve un token único para el botón Deshacer."""
+    global _undo_seq
+    _undo_seq += 1
+    _undo_store[_undo_seq] = snapshot
+    return _undo_seq
+
+
+def _pop_undo(token: int):
+    """Saca (y elimina) el snapshot. None si el token ya no existe."""
+    return _undo_store.pop(token, None)
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -532,6 +552,40 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     view_letter = parts[1] if len(parts) > 1 else "H"
 
+    # Deshacer borrado de /duplicados: restaura el item desde el store en memoria.
+    if action_type == "zD":
+        snapshot = _pop_undo(item_id)
+        if snapshot is None:
+            await query.answer("Ya no se puede deshacer")
+            try:
+                await query.edit_message_text(
+                    "↩️ El deshacer ya ha caducado.", reply_markup=None
+                )
+            except BadRequest:
+                pass
+            return
+        try:
+            tools.restore_from_snapshot(snapshot)
+            label = snapshot["data"].get("text") or snapshot["data"].get("title") or ""
+            await query.edit_message_text(
+                f"↩️ Restaurado: <b>{html.escape(label)}</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=None,
+            )
+        except Exception:
+            log.exception("Error restaurando snapshot de undo")
+            await query.answer("No pude restaurar")
+            return
+        await query.answer("Restaurado")
+        return
+
+    # Captura el snapshot ANTES de borrar, solo para borrados desde /duplicados,
+    # para poder ofrecer el botón Deshacer.
+    undo_snapshot = None
+    if action_type in ("xT", "xE") and view_letter == "D":
+        kind = "task" if action_type == "xT" else "event"
+        undo_snapshot = tools.snapshot_for_undo(kind, item_id)
+
     handler = _CALLBACK_ACTIONS.get(action_type)
     if handler is None:
         log.warning("Acción de callback desconocida: %r", action_type)
@@ -635,6 +689,24 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard,
         )
+
+    # Si se borró un item desde /duplicados, ofrece deshacer en un mensaje aparte
+    # (la lista de duplicados ya se ha repintado arriba).
+    if undo_snapshot is not None:
+        token = _push_undo(undo_snapshot)
+        label = undo_snapshot["data"].get("text") or undo_snapshot["data"].get("title") or ""
+        undo_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("↩️ Deshacer", callback_data=f"zD:{token}"),
+        ]])
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=f"🗑️ Borrado: <s>{html.escape(label)}</s>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=undo_kb,
+            )
+        except Exception:
+            log.exception("Error enviando mensaje de deshacer")
 
     await query.answer()
 

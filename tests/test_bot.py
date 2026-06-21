@@ -743,3 +743,83 @@ async def test_on_start_unauthorized_ignored(monkeypatch):
     await bot._on_start(update, MagicMock())
 
     reply_mock.assert_not_called()
+
+
+# ---- Deshacer borrado en /duplicados ----
+
+def test_undo_store_push_and_pop():
+    bot._undo_store.clear()
+    tok = bot._push_undo({"kind": "task", "data": {"text": "x", "due_date": None}})
+    assert isinstance(tok, int)
+    snap = bot._pop_undo(tok)
+    assert snap["data"]["text"] == "x"
+    # tras pop, queda vacío
+    assert bot._pop_undo(tok) is None
+
+
+def test_undo_store_tokens_are_unique():
+    bot._undo_store.clear()
+    t1 = bot._push_undo({"kind": "task", "data": {"text": "a", "due_date": None}})
+    t2 = bot._push_undo({"kind": "task", "data": {"text": "b", "due_date": None}})
+    assert t1 != t2
+
+
+@pytest.mark.asyncio
+async def test_callback_delete_in_duplicados_sends_undo_button(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._undo_store.clear()
+    # Dos tareas duplicadas para que /duplicados las agrupe
+    a = tools.add_task("Reservar cita peluquería")
+    tools.add_task("Reservar cita peluquería")
+
+    query = _make_callback_query(f"xT:{a['id']}:D")
+    context = _make_context_with_bot()
+    await bot._on_callback_query(_make_update_with_callback(query), context)
+
+    # Solo se borró una
+    assert len(tools.list_tasks()) == 1
+    # Se mandó un mensaje aparte con botón Deshacer (callback zD:*)
+    context.bot.send_message.assert_called_once()
+    kwargs = context.bot.send_message.call_args.kwargs
+    assert "Borrado" in kwargs["text"]
+    markup = kwargs["reply_markup"]
+    btn = markup.inline_keyboard[0][0]
+    assert btn.callback_data.startswith("zD:")
+    assert "Deshacer" in btn.text
+
+
+@pytest.mark.asyncio
+async def test_callback_undo_restores_deleted_task(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._undo_store.clear()
+    a = tools.add_task("Reservar cita peluquería", due_date="2026-06-20")
+    tools.add_task("Reservar cita peluquería")
+
+    # Borra una desde /duplicados
+    q1 = _make_callback_query(f"xT:{a['id']}:D")
+    ctx = _make_context_with_bot()
+    await bot._on_callback_query(_make_update_with_callback(q1), ctx)
+    assert len(tools.list_tasks()) == 1
+
+    # Extrae el token del botón Deshacer y púlsalo
+    token_data = ctx.bot.send_message.call_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
+    q2 = _make_callback_query(token_data)
+    await bot._on_callback_query(_make_update_with_callback(q2), _make_context_with_bot())
+
+    # La tarea volvió (con su due_date)
+    rows = tools.list_tasks()
+    assert len(rows) == 2
+    restored = [r for r in rows if r["due_date"] == "2026-06-20"]
+    assert len(restored) == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_undo_expired_token_is_graceful(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._undo_store.clear()
+    q = _make_callback_query("zD:99999")
+    await bot._on_callback_query(_make_update_with_callback(q), _make_context_with_bot())
+    # No crashea; responde algo al usuario
+    q.answer.assert_called()

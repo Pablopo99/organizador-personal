@@ -1271,6 +1271,57 @@ def delete_task(task_id: int) -> dict:
     return {"id": task_id, "deleted": cur.rowcount}
 
 
+def snapshot_for_undo(kind: str, item_id: int) -> Optional[dict]:
+    """Captura los campos de una tarea/evento ANTES de borrarla, para poder
+    recrearla con restore_from_snapshot si el usuario pulsa Deshacer.
+    Devuelve None si el item no existe. No incluye gcal_event_id a propósito:
+    al restaurar se crea un item local nuevo, sin re-sincronizar a Calendar."""
+    with db.connect() as conn:
+        if kind == "task":
+            row = conn.execute(
+                "SELECT text, due_date FROM tasks WHERE id = ?", (item_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return {"kind": "task", "data": {
+                "text": row["text"], "due_date": row["due_date"],
+            }}
+        if kind == "event":
+            row = conn.execute(
+                "SELECT title, datetime, category, recurring_rule, notes "
+                "FROM events WHERE id = ?", (item_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return {"kind": "event", "data": {
+                "title": row["title"],
+                "datetime": row["datetime"],
+                "category": row["category"],
+                "recurring_rule": row["recurring_rule"],
+                "notes": row["notes"],
+            }}
+    raise ValueError(f"kind no soportado para undo: {kind}")
+
+
+def restore_from_snapshot(snapshot: dict) -> dict:
+    """Recrea una tarea/evento a partir del snapshot capturado. Crea un item
+    NUEVO (id distinto), sin sincronizar a Calendar."""
+    kind = snapshot["kind"]
+    data = snapshot["data"]
+    if kind == "task":
+        return add_task(data["text"], due_date=data["due_date"])
+    if kind == "event":
+        return add_event(
+            data["title"],
+            data["datetime"],
+            data["category"],
+            recurring_rule=data["recurring_rule"],
+            notes=data["notes"],
+            sync_to_calendar=False,
+        )
+    raise ValueError(f"kind no soportado para undo: {kind}")
+
+
 # ------------------------------------------------------------- duplicados ----
 
 def _normalize_title(s: str) -> str:

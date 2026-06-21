@@ -106,3 +106,70 @@ def test_delete_task_removes_it():
     out = tools.delete_task(t["id"])
     assert out["deleted"] == 1
     assert all(x["id"] != t["id"] for x in tools.list_tasks(include_done=True))
+
+
+# ---- snapshot / restore para deshacer borrado ----
+
+def test_snapshot_for_undo_task_captures_fields():
+    t = tools.add_task("Comprar pan", due_date="2026-06-20")
+    snap = tools.snapshot_for_undo("task", t["id"])
+    assert snap["kind"] == "task"
+    assert snap["data"]["text"] == "Comprar pan"
+    assert snap["data"]["due_date"] == "2026-06-20"
+
+
+def test_snapshot_for_undo_event_captures_fields():
+    e = tools.add_event("Dentista", "2026-06-20T10:00:00", "personal", notes="muela")
+    snap = tools.snapshot_for_undo("event", e["id"])
+    assert snap["kind"] == "event"
+    assert snap["data"]["title"] == "Dentista"
+    assert snap["data"]["datetime"] == "2026-06-20T10:00:00"
+    assert snap["data"]["category"] == "personal"
+    assert snap["data"]["notes"] == "muela"
+
+
+def test_snapshot_for_undo_not_found_returns_none():
+    assert tools.snapshot_for_undo("task", 99999) is None
+    assert tools.snapshot_for_undo("event", 99999) is None
+
+
+def test_restore_from_snapshot_task_recreates_it():
+    t = tools.add_task("Comprar pan", due_date="2026-06-20")
+    snap = tools.snapshot_for_undo("task", t["id"])
+    tools.delete_task(t["id"])
+    assert tools.list_tasks() == []
+    restored = tools.restore_from_snapshot(snap)
+    rows = tools.list_tasks()
+    assert len(rows) == 1
+    assert rows[0]["text"] == "Comprar pan"
+    assert rows[0]["due_date"] == "2026-06-20"
+    assert restored["id"] == rows[0]["id"]
+
+
+def test_restore_from_snapshot_event_recreates_it():
+    e = tools.add_event("Dentista", "2026-06-20T10:00:00", "personal", notes="muela")
+    snap = tools.snapshot_for_undo("event", e["id"])
+    tools.delete_event(e["id"])
+    restored = tools.restore_from_snapshot(snap)
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT title, datetime, category, notes FROM events WHERE id = ?",
+            (restored["id"],),
+        ).fetchone()
+    assert row["title"] == "Dentista"
+    assert row["datetime"] == "2026-06-20T10:00:00"
+    assert row["category"] == "personal"
+    assert row["notes"] == "muela"
+
+
+def test_restore_from_snapshot_event_does_not_resync_calendar():
+    """Restaurar NO debe re-sincronizar a Google Calendar automáticamente."""
+    e = tools.add_event("Dentista", "2026-06-20T10:00:00", "personal")
+    snap = tools.snapshot_for_undo("event", e["id"])
+    tools.delete_event(e["id"])
+    restored = tools.restore_from_snapshot(snap)
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT gcal_event_id FROM events WHERE id = ?", (restored["id"],)
+        ).fetchone()
+    assert row["gcal_event_id"] is None
