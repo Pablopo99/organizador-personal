@@ -806,8 +806,79 @@ def test_render_rachas_view_streak_and_percentages(monkeypatch):
     assert "Meditar" in text
     assert "racha" in text
     assert "30d:" in text
-    assert "🟢" in text and "🟡" in text and "🔴" in text
+    # grace = 0 en este escenario → el 🟡 se omite (ruido)
+    assert "🟢" in text and "🔴" in text
+    assert "🟡" not in text
     assert keyboard is None
+
+
+def test_render_rachas_sin_racha_no_dice_cero_dias(monkeypatch):
+    """current_streak 0 → 'sin racha aún', nunca 'racha 0 días'."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    tools.add_event(
+        "Leer", "2026-05-28T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    # Sin completions → racha 0
+    with db.connect() as conn:
+        text, _ = views.render_rachas_view(date(2026, 5, 30), conn)
+    assert "sin racha" in text.lower()
+    assert "racha 0 día" not in text
+
+
+def test_render_rachas_singular_un_dia(monkeypatch):
+    """racha de 1 → 'racha 1 día' (singular), no 'racha 1 días'."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    r = tools.add_event(
+        "Meditar", "2026-05-29T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO routine_completions "
+            "(event_id, completion_date, created_at, status) "
+            "VALUES (?, '2026-05-29', '2026-05-29T08:00:00', 'on_time')",
+            (r["id"],),
+        )
+    with db.connect() as conn:
+        text, _ = views.render_rachas_view(date(2026, 5, 30), conn)
+    assert "racha 1 día" in text
+    assert "racha 1 días" not in text
+
+
+def test_render_rachas_muestra_amarillo_si_hay_grace(monkeypatch):
+    """Si hay completions en grace, el 🟡 sí aparece."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    r = tools.add_event(
+        "Estirar", "2026-05-28T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO routine_completions "
+            "(event_id, completion_date, created_at, status) "
+            "VALUES (?, '2026-05-28', '2026-05-30T08:00:00', 'grace')",
+            (r["id"],),
+        )
+    with db.connect() as conn:
+        text, _ = views.render_rachas_view(date(2026, 5, 30), conn)
+    assert "🟡" in text
+
+
+def test_render_week_streak_sin_palabra_seguidos(monkeypatch):
+    """/semana muestra '🔥 N' sin 'seguidos' (evita salto de línea)."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    e = tools.add_event(
+        "Flexiones", "2026-05-28T08:00:00", "personal", recurring_rule="DAILY"
+    )
+    with db.connect() as conn:
+        for d in ("2026-05-28", "2026-05-29"):
+            conn.execute(
+                "INSERT INTO routine_completions "
+                "(event_id, completion_date, created_at) VALUES (?, ?, ?)",
+                (e["id"], d, "2026-05-30T08:00:00"),
+            )
+    with db.connect() as conn:
+        text, _ = views.render_week_view(date(2026, 5, 30), conn)
+    assert "🔥" in text
+    assert "seguidos" not in text
 
 
 def test_render_duplicados_view_none():

@@ -338,7 +338,7 @@ def render_week_view(
         for r in routines:
             base = f"• {r['title']} ({r['completed_days']}/{r['scheduled_days']} días)"
             if r["current_streak"] >= 2:
-                base += f" 🔥 {r['current_streak']} seguidos"
+                base += f" 🔥 {r['current_streak']}"
             lines.append(base)
         sections.append("🔁 <b>RUTINAS</b>\n" + "\n".join(lines))
 
@@ -458,13 +458,22 @@ def render_rachas_view(
 
     lines = ["🔥 <b>RACHAS</b>"]
     for r in routines:
-        line = f"• {r['title']} — racha {r['current_streak']} días"
+        streak = r["current_streak"]
+        if streak == 0:
+            line = f"• {r['title']} — sin racha aún"
+        else:
+            unit = "día" if streak == 1 else "días"
+            line = f"• {r['title']} — racha {streak} {unit}"
         sched = r["scheduled_days"]
         if sched > 0:
             pct_on = round(100 * r["on_time_count"] / sched)
             pct_grace = round(100 * r["grace_count"] / sched)
             pct_missed = 100 - pct_on - pct_grace
-            line += f" (30d: 🟢 {pct_on}% 🟡 {pct_grace}% 🔴 {pct_missed}%)"
+            # Omite el 🟡 cuando no hay días en gracia (ruido visual)
+            if pct_grace > 0:
+                line += f" (30d: 🟢 {pct_on}% 🟡 {pct_grace}% 🔴 {pct_missed}%)"
+            else:
+                line += f" (30d: 🟢 {pct_on}% 🔴 {pct_missed}%)"
         if r["current_streak"] == r["best_streak"] and r["best_streak"] > 0:
             line += " 🏆"
         lines.append(line)
