@@ -37,13 +37,18 @@ _RATE_LIMIT_MSG = (
 # al reiniciar el bot: el deshacer es inmediato, mientras el mensaje exista.
 _undo_store: dict[int, dict] = {}
 _undo_seq = 0
+_UNDO_MAX = 50  # tope de snapshots vivos; evita crecimiento ilimitado
 
 
 def _push_undo(snapshot: dict) -> int:
-    """Guarda un snapshot y devuelve un token único para el botón Deshacer."""
+    """Guarda un snapshot y devuelve un token único para el botón Deshacer.
+    Mantiene como mucho _UNDO_MAX entradas (descarta las más antiguas)."""
     global _undo_seq
     _undo_seq += 1
     _undo_store[_undo_seq] = snapshot
+    while len(_undo_store) > _UNDO_MAX:
+        oldest = min(_undo_store)
+        del _undo_store[oldest]
     return _undo_seq
 
 
@@ -71,6 +76,38 @@ def _peek_pending_edit(user_id: int):
 def _pop_pending_edit(user_id: int):
     """Saca (y elimina) el estado de edición. None si no hay."""
     return _pending_edit.pop(user_id, None)
+
+
+def _apply_pending_edit_if_any(text: str, user_id: int) -> Optional[str]:
+    """Si el usuario está en modo edición (tras pulsar ✏️), interpreta `text`
+    como el nuevo título y lo aplica. Devuelve la respuesta a enviar, o None si
+    no hay edición pendiente o si el texto es un comando (en cuyo caso se cancela
+    el modo y se deja que el flujo normal procese el comando).
+
+    Compartido por texto (process_incoming) y voz (process_voice_transcription)
+    para que el estado no quede colgado en ninguna vía."""
+    pending = _peek_pending_edit(user_id)
+    if pending is None:
+        return None
+    stripped = text.strip()
+    if stripped.lower() == "/cancelar":
+        _pop_pending_edit(user_id)
+        return "Edición cancelada."
+    if stripped.startswith("/"):
+        # Un comando: cancela el modo y deja que el flujo normal lo trate.
+        _pop_pending_edit(user_id)
+        return None
+    if not stripped:
+        return "Dame el nuevo texto, o escribe /cancelar."
+    _pop_pending_edit(user_id)
+    if pending["kind"] == "task":
+        res = tools.update_task(pending["id"], {"text": stripped})
+    else:
+        res = tools.update_objective(pending["id"], {"text": stripped})
+    if res.get("updated"):
+        # Escapa para el parse_mode HTML del reply (el texto crudo ya se guardó).
+        return f"✅ Cambiado a «{html.escape(stripped)}»."
+    return "Ese item ya no existe (¿lo borraste?)."
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -117,30 +154,11 @@ def process_incoming(text: str, from_user_id: int) -> Optional[str]:
         log.warning("Mensaje ignorado de user_id no autorizado: %s", from_user_id)
         return None
 
-    # Edición de texto en curso (tras pulsar ✏️): el siguiente mensaje es el
-    # nuevo título, salvo que sea /cancelar o cualquier comando.
-    pending = _peek_pending_edit(from_user_id)
-    if pending is not None:
-        stripped = text.strip()
-        if stripped.lower() == "/cancelar":
-            _pop_pending_edit(from_user_id)
-            return "Edición cancelada."
-        if stripped.startswith("/"):
-            # Un comando: cancela el modo y deja que el flujo normal lo trate.
-            _pop_pending_edit(from_user_id)
-        elif not stripped:
-            return "Dame el nuevo texto, o escribe /cancelar."
-        else:
-            _pop_pending_edit(from_user_id)
-            if pending["kind"] == "task":
-                res = tools.update_task(pending["id"], {"text": stripped})
-            else:
-                res = tools.update_objective(pending["id"], {"text": stripped})
-            if res.get("updated"):
-                # Escapa para el parse_mode HTML del reply (el texto crudo ya
-                # se guardó sin escapar en la BD).
-                return f"✅ Cambiado a «{html.escape(stripped)}»."
-            return "Ese item ya no existe (¿lo borraste?)."
+    # Edición de texto en curso (tras pulsar ✏️): aplica el nuevo título. Si
+    # devuelve None, no había edición (o era un comando) → sigue el flujo normal.
+    edit_reply = _apply_pending_edit_if_any(text, from_user_id)
+    if edit_reply is not None:
+        return edit_reply
 
     cleaned = text.strip().lower()
 
@@ -173,6 +191,12 @@ def process_voice_transcription(transcription: str, from_user_id: int) -> Option
     cleaned = transcription.strip()
     if not cleaned:
         return "No he entendido nada del audio. ¿Puedes repetirlo o escribirme?"
+
+    # Edición de texto en curso (tras pulsar ✏️): un audio aplica la
+    # transcripción como nuevo título, igual que un mensaje de texto.
+    edit_reply = _apply_pending_edit_if_any(cleaned, from_user_id)
+    if edit_reply is not None:
+        return edit_reply
 
     try:
         return markdown_to_html(brain.handle_message(cleaned, user_id=from_user_id))
@@ -334,9 +358,17 @@ async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _cancel_edit_on_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler de grupo -1: si llega cualquier comando estando en modo edición
-    (✏️), cancela el modo. No consume el update — el CommandHandler de grupo 0
-    lo procesa normalmente después."""
+    """Handler de grupo -1: si llega un comando REGISTRADO (/hoy, /pendientes…)
+    estando en modo edición (✏️), cancela el modo. No consume el update — el
+    CommandHandler de grupo 0 lo procesa después.
+
+    Excepción: /cancelar NO se toca aquí; llega a process_incoming, que da el
+    mensaje 'Edición cancelada'. Si lo limpiáramos aquí, process_incoming vería
+    el estado ya vacío y mandaría '/cancelar' a la IA."""
+    msg = getattr(update, "message", None)
+    text = (getattr(msg, "text", "") or "") if msg else ""
+    if text.strip().lower() == "/cancelar":
+        return
     user = getattr(update, "effective_user", None)
     if user is not None:
         _pop_pending_edit(user.id)

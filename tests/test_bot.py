@@ -1034,3 +1034,64 @@ def test_process_incoming_edit_escapes_html_in_confirmation(temp_db_for_bot, mon
     assert "&lt;leche&gt;" in reply
     # el texto crudo SÍ se guarda sin escapar en la BD
     assert tools.list_tasks()[0]["text"] == "Comprar pan & <leche>"
+
+
+# ---- Fixes de revisión: /cancelar, voz en edición, cap del undo store ----
+
+@pytest.mark.asyncio
+async def test_cancel_edit_on_command_ignores_cancelar(monkeypatch):
+    """El handler grupo -1 NO debe limpiar para /cancelar: deja que
+    process_incoming dé el mensaje 'Edición cancelada'."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    bot._set_pending_edit(42, "task", 7)
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 42
+    update.message = MagicMock()
+    update.message.text = "/cancelar"
+    await bot._cancel_edit_on_command(update, MagicMock())
+
+    # Sigue pendiente (lo cancelará process_incoming, no el grupo -1)
+    assert bot._peek_pending_edit(42) == {"kind": "task", "id": 7}
+
+
+@pytest.mark.asyncio
+async def test_cancel_edit_on_command_clears_for_registered_command(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    bot._set_pending_edit(42, "task", 7)
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 42
+    update.message = MagicMock()
+    update.message.text = "/hoy"
+    await bot._cancel_edit_on_command(update, MagicMock())
+
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_voice_transcription_applies_pending_edit(temp_db_for_bot, monkeypatch):
+    """En modo edición, un audio aplica la transcripción como nuevo texto
+    (no queda el estado colgado)."""
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan")
+    bot._set_pending_edit(42, "task", t["id"])
+
+    reply = bot.process_voice_transcription("Comprar pan integral", from_user_id=42)
+
+    assert "integral" in reply.lower()
+    assert tools.list_tasks()[0]["text"] == "Comprar pan integral"
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_undo_store_is_capped(monkeypatch):
+    """El store de deshacer no crece sin límite."""
+    bot._undo_store.clear()
+    for i in range(bot._UNDO_MAX + 20):
+        bot._push_undo({"kind": "task", "data": {"text": f"t{i}", "due_date": None}})
+    assert len(bot._undo_store) <= bot._UNDO_MAX
