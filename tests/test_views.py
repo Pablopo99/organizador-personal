@@ -898,3 +898,42 @@ def test_render_duplicados_view_lists_groups_with_delete_buttons():
     datas = [row[0].callback_data for row in keyboard.inline_keyboard]
     assert f"xT:{t1['id']}:D" in datas
     assert f"xT:{t2['id']}:D" in datas
+
+
+# ---- Botón ✏️ editar texto en vistas ----
+
+def test_pending_view_has_edit_button():
+    """Cada fila de tarea pendiente tiene un botón ✏️ (eT) junto al toggle."""
+    t = tools.add_task("Comprar pan")
+    with db.connect() as conn:
+        _, keyboard = views.render_pending_view(conn)
+    row = keyboard.inline_keyboard[0]
+    assert len(row) == 2
+    assert row[0].callback_data == f"mT:{t['id']}:P"
+    assert row[1].callback_data == f"eT:{t['id']}:P"
+    assert row[1].text == "✏️"
+
+
+def test_objectives_view_pending_has_edit_button(monkeypatch):
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    o = tools.add_objective("Pendiente A", "2026-05-18")
+    with db.connect() as conn:
+        _, keyboard = views.render_objectives_view(date(2026, 5, 19), conn)
+    row = keyboard.inline_keyboard[0]
+    assert len(row) == 2
+    assert row[0].callback_data == f"mO:{o['id']}:O"
+    assert row[1].callback_data == f"eO:{o['id']}:O"
+    assert row[1].text == "✏️"
+
+
+def test_objectives_view_completed_has_no_edit_button(monkeypatch):
+    """Los objetivos completados (🏆) NO llevan ✏️ — solo el toggle uO."""
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    o = tools.add_objective("Hecho B", "2026-05-18")
+    tools.mark_objective_done(o["id"])
+    with db.connect() as conn:
+        _, keyboard = views.render_objectives_view(date(2026, 5, 19), conn)
+    # Buscar la fila del completado (callback uO)
+    done_rows = [r for r in keyboard.inline_keyboard if r[0].callback_data.startswith("uO")]
+    assert len(done_rows) == 1
+    assert len(done_rows[0]) == 1  # solo el toggle, sin ✏️

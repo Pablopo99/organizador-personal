@@ -823,3 +823,214 @@ async def test_callback_undo_expired_token_is_graceful(temp_db_for_bot, monkeypa
     await bot._on_callback_query(_make_update_with_callback(q), _make_context_with_bot())
     # No crashea; responde algo al usuario
     q.answer.assert_called()
+
+
+# ---- Botón ✏️ editar texto: estado e intercepción ----
+
+def test_pending_edit_store_set_peek_pop():
+    bot._pending_edit.clear()
+    bot._set_pending_edit(42, "task", 7)
+    assert bot._peek_pending_edit(42) == {"kind": "task", "id": 7}
+    # peek no elimina
+    assert bot._peek_pending_edit(42) == {"kind": "task", "id": 7}
+    popped = bot._pop_pending_edit(42)
+    assert popped == {"kind": "task", "id": 7}
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_pop_pending_edit_unknown_user_returns_none():
+    bot._pending_edit.clear()
+    assert bot._pop_pending_edit(99999) is None
+
+
+def test_process_incoming_applies_text_edit_to_task(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan", due_date="2026-06-25")
+    bot._set_pending_edit(42, "task", t["id"])
+
+    reply = bot.process_incoming(text="Comprar pan integral", from_user_id=42)
+
+    assert "integral" in reply.lower()
+    rows = tools.list_tasks()
+    row = next(r for r in rows if r["id"] == t["id"])
+    assert row["text"] == "Comprar pan integral"
+    assert row["due_date"] == "2026-06-25"  # fecha intacta
+    # el modo se consumió
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_process_incoming_applies_text_edit_to_objective(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    o = tools.add_objective("Leer 2 libros", "2026-06-22")
+    bot._set_pending_edit(42, "objective", o["id"])
+
+    reply = bot.process_incoming(text="Leer 3 libros", from_user_id=42)
+
+    assert "3 libros" in reply.lower()
+    rows = tools.query_objectives(None)
+    row = next(r for r in rows if r["id"] == o["id"])
+    assert row["text"] == "Leer 3 libros"
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_process_incoming_edit_cancelar_aborts(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan")
+    bot._set_pending_edit(42, "task", t["id"])
+
+    reply = bot.process_incoming(text="/cancelar", from_user_id=42)
+
+    assert "cancel" in reply.lower()
+    assert tools.list_tasks()[0]["text"] == "Comprar pan"  # intacto
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_process_incoming_edit_slash_command_aborts_and_falls_through(temp_db_for_bot, monkeypatch):
+    """Un comando (p.ej. /nueva) en modo edición cancela el modo y se procesa
+    como comando, no como texto nuevo de la tarea."""
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan")
+    bot._set_pending_edit(42, "task", t["id"])
+
+    reset_called = {}
+    monkeypatch.setattr(bot.brain, "reset_history", lambda uid: reset_called.setdefault("uid", uid))
+
+    reply = bot.process_incoming(text="/nueva", from_user_id=42)
+
+    # /nueva se ejecutó (no se usó como texto de la tarea)
+    assert reset_called.get("uid") == 42
+    assert tools.list_tasks()[0]["text"] == "Comprar pan"  # intacto
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_process_incoming_edit_empty_text_keeps_mode(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan")
+    bot._set_pending_edit(42, "task", t["id"])
+
+    reply = bot.process_incoming(text="   ", from_user_id=42)
+
+    # sigue en modo edición
+    assert bot._peek_pending_edit(42) == {"kind": "task", "id": t["id"]}
+    assert tools.list_tasks()[0]["text"] == "Comprar pan"
+
+
+def test_process_incoming_edit_deleted_item_graceful(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan")
+    bot._set_pending_edit(42, "task", t["id"])
+    tools.delete_task(t["id"])  # borrada mientras editabas
+
+    reply = bot.process_incoming(text="Comprar pan integral", from_user_id=42)
+
+    assert "ya no existe" in reply.lower()
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_process_incoming_no_pending_edit_goes_to_brain(temp_db_for_bot, monkeypatch):
+    """Regresión: sin modo edición, el texto va a brain como siempre."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    called = {}
+    monkeypatch.setattr(bot.brain, "handle_message", lambda text, user_id=0: called.setdefault("text", text) or "ok")
+
+    reply = bot.process_incoming(text="hola qué tal", from_user_id=42)
+
+    assert called.get("text") == "hola qué tal"
+
+
+# ---- Botón ✏️ editar texto: callbacks ----
+
+@pytest.mark.asyncio
+async def test_callback_eT_enters_edit_mode(temp_db_for_bot, monkeypatch):
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Comprar pan")
+
+    query = _make_callback_query(f"eT:{t['id']}:P")
+    ctx = _make_context_with_bot()
+    await bot._on_callback_query(_make_update_with_callback(query), ctx)
+
+    # Entró en modo edición para esa tarea
+    assert bot._peek_pending_edit(42) == {"kind": "task", "id": t["id"]}
+    # Mandó un mensaje pidiendo el nuevo texto
+    ctx.bot.send_message.assert_called_once()
+    sent = ctx.bot.send_message.call_args.kwargs["text"]
+    assert "nuevo texto" in sent.lower()
+    assert "Comprar pan" in sent
+
+
+@pytest.mark.asyncio
+async def test_callback_eO_enters_edit_mode(temp_db_for_bot, monkeypatch):
+    import tools
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 19))
+    bot._pending_edit.clear()
+    o = tools.add_objective("Leer 2 libros", "2026-05-18")
+
+    query = _make_callback_query(f"eO:{o['id']}:O")
+    ctx = _make_context_with_bot()
+    await bot._on_callback_query(_make_update_with_callback(query), ctx)
+
+    assert bot._peek_pending_edit(42) == {"kind": "objective", "id": o["id"]}
+    ctx.bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_callback_eT_missing_item_no_edit_mode(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+
+    query = _make_callback_query("eT:99999:P")
+    ctx = _make_context_with_bot()
+    await bot._on_callback_query(_make_update_with_callback(query), ctx)
+
+    # No entra en modo edición si el item no existe
+    assert bot._peek_pending_edit(42) is None
+    query.answer.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_edit_on_command_clears_state(monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    bot._set_pending_edit(42, "task", 7)
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 42
+    await bot._cancel_edit_on_command(update, MagicMock())
+
+    assert bot._peek_pending_edit(42) is None
+
+
+def test_process_incoming_edit_escapes_html_in_confirmation(temp_db_for_bot, monkeypatch):
+    """Si el nuevo texto tiene <, > o &, la confirmación debe escaparlos
+    (el reply se manda con parse_mode HTML y rompería si no)."""
+    import tools
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    bot._pending_edit.clear()
+    t = tools.add_task("Cosa")
+    bot._set_pending_edit(42, "task", t["id"])
+
+    reply = bot.process_incoming(text="Comprar pan & <leche>", from_user_id=42)
+
+    assert "&amp;" in reply
+    assert "&lt;leche&gt;" in reply
+    # el texto crudo SÍ se guarda sin escapar en la BD
+    assert tools.list_tasks()[0]["text"] == "Comprar pan & <leche>"

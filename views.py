@@ -259,9 +259,10 @@ def render_pending_view(conn) -> tuple[str, Optional[InlineKeyboardMarkup]]:
 
     buttons: list[list[InlineKeyboardButton]] = []
     for t in grace + with_date + floating:
-        buttons.append([InlineKeyboardButton(
-            f"🔲 {t['text']}", callback_data=f"mT:{t['id']}:P"
-        )])
+        buttons.append([
+            InlineKeyboardButton(f"🔲 {t['text']}", callback_data=f"mT:{t['id']}:P"),
+            InlineKeyboardButton("✏️", callback_data=f"eT:{t['id']}:P"),
+        ])
 
     return text, InlineKeyboardMarkup(buttons)
 
@@ -430,9 +431,10 @@ def render_objectives_view(
 
     buttons: list[list[InlineKeyboardButton]] = []
     for o in pending:
-        buttons.append([InlineKeyboardButton(
-            f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:O"
-        )])
+        buttons.append([
+            InlineKeyboardButton(f"🔲 {o['text']}", callback_data=f"mO:{o['id']}:O"),
+            InlineKeyboardButton("✏️", callback_data=f"eO:{o['id']}:O"),
+        ])
     for o in done:
         buttons.append([InlineKeyboardButton(
             f"✅ {o['text']}", callback_data=f"uO:{o['id']}:O"

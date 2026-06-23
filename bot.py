@@ -51,6 +51,27 @@ def _pop_undo(token: int):
     """Saca (y elimina) el snapshot. None si el token ya no existe."""
     return _undo_store.pop(token, None)
 
+
+# Estado de "edición de texto en curso" tras pulsar ✏️. Mapea user_id →
+# {"kind": "task"|"objective", "id": int}. El siguiente mensaje de texto del
+# usuario se interpreta como el nuevo título. Se pierde al reiniciar (igual
+# que _history/_undo_store): la edición es inmediata.
+_pending_edit: dict[int, dict] = {}
+
+
+def _set_pending_edit(user_id: int, kind: str, item_id: int) -> None:
+    _pending_edit[user_id] = {"kind": kind, "id": item_id}
+
+
+def _peek_pending_edit(user_id: int):
+    """Consulta el estado de edición sin eliminarlo. None si no hay."""
+    return _pending_edit.get(user_id)
+
+
+def _pop_pending_edit(user_id: int):
+    """Saca (y elimina) el estado de edición. None si no hay."""
+    return _pending_edit.pop(user_id, None)
+
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO,
@@ -95,6 +116,31 @@ def process_incoming(text: str, from_user_id: int) -> Optional[str]:
     if from_user_id != ALLOWED_USER_ID:
         log.warning("Mensaje ignorado de user_id no autorizado: %s", from_user_id)
         return None
+
+    # Edición de texto en curso (tras pulsar ✏️): el siguiente mensaje es el
+    # nuevo título, salvo que sea /cancelar o cualquier comando.
+    pending = _peek_pending_edit(from_user_id)
+    if pending is not None:
+        stripped = text.strip()
+        if stripped.lower() == "/cancelar":
+            _pop_pending_edit(from_user_id)
+            return "Edición cancelada."
+        if stripped.startswith("/"):
+            # Un comando: cancela el modo y deja que el flujo normal lo trate.
+            _pop_pending_edit(from_user_id)
+        elif not stripped:
+            return "Dame el nuevo texto, o escribe /cancelar."
+        else:
+            _pop_pending_edit(from_user_id)
+            if pending["kind"] == "task":
+                res = tools.update_task(pending["id"], {"text": stripped})
+            else:
+                res = tools.update_objective(pending["id"], {"text": stripped})
+            if res.get("updated"):
+                # Escapa para el parse_mode HTML del reply (el texto crudo ya
+                # se guardó sin escapar en la BD).
+                return f"✅ Cambiado a «{html.escape(stripped)}»."
+            return "Ese item ya no existe (¿lo borraste?)."
 
     cleaned = text.strip().lower()
 
@@ -285,6 +331,15 @@ async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Error handler global: loguea cualquier excepción no capturada en handlers
     para tener visibilidad (antes quedaban en el logger de asyncio sin contexto)."""
     log.exception("Excepción no capturada en un handler", exc_info=context.error)
+
+
+async def _cancel_edit_on_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler de grupo -1: si llega cualquier comando estando en modo edición
+    (✏️), cancela el modo. No consume el update — el CommandHandler de grupo 0
+    lo procesa normalmente después."""
+    user = getattr(update, "effective_user", None)
+    if user is not None:
+        _pop_pending_edit(user.id)
 
 
 async def _on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -579,6 +634,32 @@ async def _on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("Restaurado")
         return
 
+    # Botón ✏️: entra en modo edición de texto para esa tarea/objetivo.
+    if action_type in ("eT", "eO"):
+        kind = "task" if action_type == "eT" else "objective"
+        table = "tasks" if kind == "task" else "objectives"
+        with db.connect() as conn:
+            row = conn.execute(
+                f"SELECT text FROM {table} WHERE id = ?", (item_id,)
+            ).fetchone()
+        if row is None:
+            await query.answer("Ese item ya no existe")
+            return
+        _set_pending_edit(query.from_user.id, kind, item_id)
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=(
+                    f"✏️ Escríbeme el nuevo texto para "
+                    f"«{html.escape(row['text'])}» (o /cancelar)."
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            log.exception("Error pidiendo nuevo texto de edición")
+        await query.answer("Escríbeme el nuevo texto")
+        return
+
     # Captura el snapshot ANTES de borrar, solo para borrados desde /duplicados,
     # para poder ofrecer el botón Deshacer.
     undo_snapshot = None
@@ -766,6 +847,10 @@ async def _async_main() -> None:
     app.add_handler(CommandHandler("objetivos", _on_objetivos))
     app.add_handler(CommandHandler("rachas", _on_rachas))
     app.add_handler(CommandHandler("duplicados", _on_duplicados))
+
+    # Grupo -1: cancela el modo edición (✏️) ante cualquier comando, sin
+    # consumir el update (los CommandHandler de grupo 0 lo procesan igual).
+    app.add_handler(MessageHandler(filters.COMMAND, _cancel_edit_on_command), group=-1)
 
     app.add_handler(MessageHandler(filters.TEXT, _on_message))
     app.add_handler(MessageHandler(filters.VOICE, _on_voice))
