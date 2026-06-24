@@ -211,6 +211,99 @@ def process_voice_transcription(transcription: str, from_user_id: int) -> Option
         )
 
 
+def _normalize_query(text: str) -> str:
+    """Minúsculas, sin tildes, sin signos en los extremos, espacios colapsados."""
+    import unicodedata
+    t = text.strip().lower()
+    t = "".join(
+        c for c in unicodedata.normalize("NFD", t)
+        if unicodedata.category(c) != "Mn"
+    )
+    t = t.strip(" ¿?¡!.,;:")
+    return " ".join(t.split())
+
+
+# Verbos/locuciones que indican una ORDEN de crear o accionar, no una consulta.
+_ACTION_WORDS = {
+    "apunta", "apuntame", "anota", "anade", "agrega", "pon", "ponme", "mete",
+    "meteme", "crea", "creame", "recuerda", "recuerdame", "avisa", "avisame",
+    "marca", "completa", "hice", "termine", "acabe", "borra", "elimina", "quita",
+    "cambia", "edita", "mueve", "sincroniza", "conecta",
+}
+# Palabras con las que una consulta de resumen suele EMPEZAR.
+_QUERY_STARTS = (
+    "que ", "muestra", "muestrame", "ensename", "dame", "ver ", "lista", "listame",
+)
+# Frases que, tal cual, son una consulta de resumen.
+_QUERY_EXACT = {
+    "hoy", "manana", "esta semana", "semana", "pendientes", "mis pendientes",
+    "mis tareas", "tareas", "objetivos", "mis objetivos", "mis metas", "metas",
+    "mi dia", "mi semana", "mi agenda", "agenda", "agenda de hoy",
+    "agenda de manana", "que tengo",
+}
+
+
+def match_summary_view(text: str) -> Optional[str]:
+    """Detecta si `text` es una consulta de resumen en lenguaje natural y, si lo
+    es, devuelve la vista a servir ('hoy'|'manana'|'semana'|'pendientes'|
+    'objetivos'). None si no es una consulta de resumen (irá a la IA).
+
+    Reglas: excluye órdenes de crear/accionar; exige una señal de consulta
+    (empieza por 'qué…/muéstrame/…' o es una frase-clave exacta); mapea por el
+    marcador temporal/tipo presente.
+    """
+    n = _normalize_query(text)
+    if not n:
+        return None
+
+    words = set(n.split())
+    if words & _ACTION_WORDS or "tengo que" in n:
+        return None
+
+    is_query = n in _QUERY_EXACT or n.startswith(_QUERY_STARTS)
+    # También es consulta si empieza por una palabra-clave de tipo y es una
+    # frase corta sin ":" ("objetivos de la semana", "tareas de hoy"). El ":"
+    # y la longitud descartan los formatos de creación rápida ("tarea: comprar…").
+    if (
+        not is_query
+        and ":" not in n
+        and len(n.split()) <= 5
+        and n.startswith(("objetivos", "pendientes", "tareas", "metas", "agenda"))
+    ):
+        is_query = True
+    if not is_query:
+        return None
+
+    if "pendiente" in n or "pendientes" in n or "tarea" in n or "tareas" in n:
+        return "pendientes"
+    if "objetivo" in n or "objetivos" in n or "meta" in n or "metas" in n:
+        return "objetivos"
+    if "semana" in n:
+        return "semana"
+    if "manana" in n:
+        return "manana"
+    if "hoy" in n or "dia" in n or "agenda" in n:
+        return "hoy"
+    return "hoy"  # "que tengo" / "mi agenda" sin marcador → resumen de hoy
+
+
+def _render_summary_view(view_key: str, conn, today):
+    """Mapea una clave de vista a su render determinista de views.py. Devuelve
+    (texto_html, teclado). Reutiliza las mismas vistas que los comandos /hoy etc."""
+    from datetime import timedelta
+    if view_key == "hoy":
+        return views.render_today_view(today, conn)
+    if view_key == "manana":
+        return views.render_tomorrow_view(today + timedelta(days=1), conn)
+    if view_key == "semana":
+        return views.render_week_view(today, conn)
+    if view_key == "pendientes":
+        return views.render_pending_view(conn)
+    if view_key == "objetivos":
+        return views.render_objectives_view(today, conn)
+    raise ValueError(f"vista desconocida: {view_key}")
+
+
 def _calendar_button_keyboard(user_id: int):
     """Si brain dejó un event_id pendiente, devuelve un teclado con el botón.
     Si no, None.
@@ -227,6 +320,24 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not update.message or not update.message.text:
         return
     user_id = update.effective_user.id
+
+    # Consulta de resumen en lenguaje natural ("qué tengo hoy", "mis objetivos"…):
+    # servir la MISMA vista determinista del comando, con sus botones, sin IA.
+    # Solo si no hay una edición de texto en curso (esa tiene prioridad).
+    if user_id == ALLOWED_USER_ID and _peek_pending_edit(user_id) is None:
+        view_key = match_summary_view(update.message.text)
+        if view_key is not None:
+            try:
+                today = date_utils.today_madrid()
+                with db.connect() as conn:
+                    text, keyboard = _render_summary_view(view_key, conn, today)
+                await update.message.reply_text(
+                    text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+                )
+                return
+            except Exception:
+                log.exception("Error sirviendo vista de resumen NL (%s); caigo a IA", view_key)
+
     reply = process_incoming(text=update.message.text, from_user_id=user_id)
     if reply is None:
         return

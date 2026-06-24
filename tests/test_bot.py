@@ -1095,3 +1095,116 @@ def test_undo_store_is_capped(monkeypatch):
     for i in range(bot._UNDO_MAX + 20):
         bot._push_undo({"kind": "task", "data": {"text": f"t{i}", "due_date": None}})
     assert len(bot._undo_store) <= bot._UNDO_MAX
+
+
+# ---- Consultas en lenguaje natural → vista determinista (detección) ----
+
+def test_match_summary_view_hoy():
+    for t in ["qué tengo hoy", "que tengo hoy", "qué hay hoy",
+              "qué tengo para hoy", "mi día", "agenda de hoy", "hoy",
+              "¿qué tengo hoy?", "muéstrame hoy"]:
+        assert bot.match_summary_view(t) == "hoy", t
+
+
+def test_match_summary_view_manana():
+    for t in ["qué tengo mañana", "mañana", "qué hay mañana", "agenda de mañana"]:
+        assert bot.match_summary_view(t) == "manana", t
+
+
+def test_match_summary_view_semana():
+    for t in ["qué tengo esta semana", "mi semana", "qué hay esta semana",
+              "esta semana"]:
+        assert bot.match_summary_view(t) == "semana", t
+
+
+def test_match_summary_view_pendientes():
+    for t in ["qué tengo pendiente", "mis tareas", "pendientes",
+              "qué tareas tengo", "mis pendientes"]:
+        assert bot.match_summary_view(t) == "pendientes", t
+
+
+def test_match_summary_view_objetivos():
+    for t in ["mis objetivos", "objetivos de la semana", "qué objetivos tengo",
+              "mis metas", "objetivos"]:
+        assert bot.match_summary_view(t) == "objetivos", t
+
+
+def test_match_summary_view_ignores_create_actions():
+    for t in ["apunta reunión hoy a las 5", "mañana tengo dentista",
+              "recuérdame comprar pan hoy", "marca leer como hecho",
+              "tengo que hacer los objetivos", "añade tarea para hoy",
+              "pon una cita mañana", "borra la tarea de hoy"]:
+        assert bot.match_summary_view(t) is None, t
+
+
+def test_match_summary_view_unrelated():
+    for t in ["hola", "gracias", "cuánto es 2+2", "ponme una alarma",
+              "cuéntame un chiste", ""]:
+        assert bot.match_summary_view(t) is None, t
+
+
+# ---- Consultas en lenguaje natural → vista determinista (integración) ----
+
+@pytest.mark.asyncio
+async def test_on_message_natural_hoy_renders_view_with_keyboard(temp_db_for_bot, monkeypatch):
+    """"qué tengo hoy" en texto libre debe servir la vista de /hoy CON botones,
+    sin pasar por la IA."""
+    import tools, date_utils
+    from datetime import date
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 6, 24))
+    tools.add_task("Comprar pan", due_date="2026-06-24")
+
+    brain_called = {}
+    def fake_brain(text, user_id=0):
+        brain_called["hit"] = True
+        return "x"
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.text = "qué tengo hoy"
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 42
+
+    await bot._on_message(update, _make_context_with_bot())
+
+    # No pasó por la IA
+    assert "hit" not in brain_called
+    # Respondió con teclado (botones de la vista)
+    reply_mock.assert_called_once()
+    assert reply_mock.call_args.kwargs.get("reply_markup") is not None
+
+
+@pytest.mark.asyncio
+async def test_on_message_normal_text_still_goes_to_brain(temp_db_for_bot, monkeypatch):
+    """Regresión: un mensaje normal sigue yendo a la IA."""
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    brain_called = {}
+    def fake_brain(text, user_id=0):
+        brain_called["text"] = text
+        return "respuesta IA"
+    monkeypatch.setattr(bot.brain, "handle_message", fake_brain)
+
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.text = "cuéntame un chiste"
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 42
+
+    await bot._on_message(update, _make_context_with_bot())
+
+    assert brain_called.get("text") == "cuéntame un chiste"
+
+
+@pytest.mark.asyncio
+async def test_on_message_natural_query_unauthorized_ignored(temp_db_for_bot, monkeypatch):
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    reply_mock = AsyncMock()
+    update = MagicMock()
+    update.message.text = "qué tengo hoy"
+    update.message.reply_text = reply_mock
+    update.effective_user.id = 999  # no autorizado
+
+    await bot._on_message(update, _make_context_with_bot())
+    reply_mock.assert_not_called()
