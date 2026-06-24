@@ -156,7 +156,10 @@ def _format_offset(minutes: int) -> str:
 
 async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cada 5 min: revisa eventos próximos y manda recordatorios pendientes."""
-    now = datetime.now()
+    import date_utils
+    # Reloj de pared de Madrid (no datetime.now() naive, que dependería de la TZ
+    # del proceso). Los datetime en BD son naive en hora Madrid.
+    now = date_utils.now_madrid_naive()
     upper = now + timedelta(hours=26)
 
     with db.connect() as conn:
@@ -229,6 +232,14 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             due.setdefault(_format_offset(r["offset_minutes"]), []).append(r)
 
     for pretty, group in due.items():
+        # Marcar sent=1 ANTES de enviar (mismo motivo que _safe_send_and_mark:
+        # evita reenvíos duplicados si algo falla tras el envío).
+        with db.connect() as conn:
+            for g in group:
+                conn.execute(
+                    "UPDATE event_reminders SET sent = 1 WHERE id = ?",
+                    (g["reminder_id"],),
+                )
         titles = ", ".join(f"<b>{g['title']}</b>" for g in group)
         text = f"⏰ En {pretty} tienes: {titles}"
         try:
@@ -242,17 +253,17 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Error enviando recordatorio(s) custom %s",
                 [g["reminder_id"] for g in group],
             )
-            continue
-        with db.connect() as conn:
-            for g in group:
-                conn.execute(
-                    "UPDATE event_reminders SET sent = 1 WHERE id = ?",
-                    (g["reminder_id"],),
-                )
 
 
 async def _safe_send_and_mark(context, text: str, event_id: int, flag_column: str) -> None:
-    """Envía el recordatorio y marca el flag. Si falla, loguea pero no levanta."""
+    """Marca el flag ANTES de enviar y luego envía. Marcar primero evita el
+    duplicado si el marcado fallara tras un envío correcto: como mucho se pierde
+    un aviso si el envío falla (raro), preferible a avisar dos veces."""
+    with db.connect() as conn:
+        conn.execute(
+            f"UPDATE events SET {flag_column} = 1 WHERE id = ?",
+            (event_id,),
+        )
     try:
         await context.bot.send_message(
             chat_id=ALLOWED_USER_ID,
@@ -261,13 +272,6 @@ async def _safe_send_and_mark(context, text: str, event_id: int, flag_column: st
         )
     except Exception:
         log.exception("Error enviando recordatorio para evento %s", event_id)
-        return
-
-    with db.connect() as conn:
-        conn.execute(
-            f"UPDATE events SET {flag_column} = 1 WHERE id = ?",
-            (event_id,),
-        )
 
 
 async def detect_missed_items(context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -75,7 +75,8 @@ async def test_morning_summary_with_pending_item_includes_keyboard(monkeypatch):
 
 def _add_event_at_offset(hours: float, title: str = "Evento", category: str = "work", done: int = 0):
     """Helper: añade un evento que ocurre en `hours` horas desde ahora."""
-    dt = datetime.now() + timedelta(hours=hours)
+    import date_utils
+    dt = date_utils.now_madrid_naive() + timedelta(hours=hours)
     with db.connect() as conn:
         cur = conn.execute(
             """
@@ -84,7 +85,7 @@ def _add_event_at_offset(hours: float, title: str = "Evento", category: str = "w
             VALUES (?, ?, ?, ?, ?, 0, 0)
             """,
             (title, dt.isoformat(timespec="seconds"), category,
-             datetime.now().isoformat(timespec="seconds"), done),
+             _date_utils.now_madrid_naive().isoformat(timespec="seconds"), done),
         )
         return cur.lastrowid
 
@@ -158,7 +159,7 @@ async def test_check_reminders_skips_done_events(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_reminders_skips_recurring_events(monkeypatch):
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
-    dt = datetime.now() + timedelta(hours=1.0)
+    dt = _date_utils.now_madrid_naive() + timedelta(hours=1.0)
     with db.connect() as conn:
         conn.execute(
             """
@@ -167,7 +168,7 @@ async def test_check_reminders_skips_recurring_events(monkeypatch):
             VALUES (?, ?, 'personal', 'WEEKLY:MON', ?, 0, 0, 0)
             """,
             ("Gimnasio", dt.isoformat(timespec="seconds"),
-             datetime.now().isoformat(timespec="seconds")),
+             _date_utils.now_madrid_naive().isoformat(timespec="seconds")),
         )
 
     send_mock = AsyncMock()
@@ -286,7 +287,7 @@ async def test_check_reminders_skips_defaults_when_event_has_customs(monkeypatch
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     import tools
     # Evento dentro de la ventana de 1h (entre 50 y 70 min)
-    when = (datetime.now() + timedelta(minutes=60)).replace(microsecond=0)
+    when = (_date_utils.now_madrid_naive() + timedelta(minutes=60)).replace(microsecond=0)
     ev = tools.add_event("Cita", when.isoformat(), "personal")
     # Añadir un recordatorio custom de 30 min antes (queda sent=0)
     tools.add_event_reminder(ev["id"], 30)
@@ -312,7 +313,7 @@ async def test_check_reminders_sends_custom_within_window(monkeypatch):
     import tools
     # Evento dentro de 35 min; custom 30 min antes → fire_time = en 5 min,
     # dentro de la ventana ±5 min.
-    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    when = (_date_utils.now_madrid_naive() + timedelta(minutes=35)).replace(microsecond=0)
     ev = tools.add_event("Dentista", when.isoformat(), "personal")
     tools.add_event_reminder(ev["id"], 30)
 
@@ -337,7 +338,7 @@ async def test_check_reminders_groups_same_time_into_one_message(monkeypatch):
     con los tres títulos, no tres mensajes."""
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     import tools
-    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    when = (_date_utils.now_madrid_naive() + timedelta(minutes=35)).replace(microsecond=0)
     ids = []
     for title in ("Dentista", "Llamar banco", "Recoger paquete"):
         ev = tools.add_event(title, when.isoformat(), "personal")
@@ -365,7 +366,7 @@ async def test_check_reminders_groups_same_time_into_one_message(monkeypatch):
 async def test_check_reminders_does_not_resend_sent_custom(monkeypatch):
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     import tools
-    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    when = (_date_utils.now_madrid_naive() + timedelta(minutes=35)).replace(microsecond=0)
     ev = tools.add_event("Dentista", when.isoformat(), "personal")
     tools.add_event_reminder(ev["id"], 30)
     # Forzar sent=1
@@ -387,7 +388,7 @@ async def test_check_reminders_ignores_custom_outside_window(monkeypatch):
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     import tools
     # Evento dentro de 24h; custom 30 min antes → fire_time aún lejos
-    when = (datetime.now() + timedelta(hours=24)).replace(microsecond=0)
+    when = (_date_utils.now_madrid_naive() + timedelta(hours=24)).replace(microsecond=0)
     ev = tools.add_event("Cita", when.isoformat(), "personal")
     tools.add_event_reminder(ev["id"], 30)
 
@@ -401,7 +402,7 @@ async def test_check_reminders_ignores_custom_outside_window(monkeypatch):
 async def test_check_reminders_ignores_custom_for_done_event(monkeypatch):
     monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
     import tools
-    when = (datetime.now() + timedelta(minutes=35)).replace(microsecond=0)
+    when = (_date_utils.now_madrid_naive() + timedelta(minutes=35)).replace(microsecond=0)
     ev = tools.add_event("Cita", when.isoformat(), "personal")
     tools.add_event_reminder(ev["id"], 30)
     with db.connect() as conn:
@@ -413,3 +414,40 @@ async def test_check_reminders_ignores_custom_for_done_event(monkeypatch):
     assert send_mock.call_count == 0
 
 
+
+
+@pytest.mark.asyncio
+async def test_check_reminders_1h_marks_before_send_no_resend_on_failure(monkeypatch):
+    """Fix #3: el flag se marca ANTES de enviar; si el envío falla, el aviso
+    NO se reenvía en la siguiente pasada (queda marcado)."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    event_id = _add_event_at_offset(hours=1.0, title="Cita")
+
+    failing = AsyncMock(side_effect=RuntimeError("telegram caído"))
+    await scheduler.check_reminders(_fake_context(failing))
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT reminder_1h_sent FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+    # marcado pese al fallo de envío → no se reenviará (evita duplicado)
+    assert row[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_check_reminders_custom_marks_before_send_no_resend_on_failure(monkeypatch):
+    """Fix #3 (custom): sent=1 aunque el envío falle, para no duplicar."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    when = (_date_utils.now_madrid_naive() + timedelta(minutes=35)).replace(microsecond=0)
+    ev = tools.add_event("Dentista", when.isoformat(), "personal")
+    tools.add_event_reminder(ev["id"], 30)
+
+    failing = AsyncMock(side_effect=RuntimeError("telegram caído"))
+    await scheduler.check_reminders(_fake_context(failing))
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT sent FROM event_reminders WHERE event_id = ?", (ev["id"],)
+        ).fetchone()
+    assert row["sent"] == 1
