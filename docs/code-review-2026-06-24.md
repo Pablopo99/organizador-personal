@@ -1,5 +1,10 @@
 # Revisión de código — 2026-06-24
 
+> **ACTUALIZACIÓN 2026-06-24:** Pablo pidió "soluciona todos". Los 7 hallazgos
+> (🔴🟡⚪) están RESUELTOS y desplegados, cada uno con tests. Resumen al final.
+> El detalle de cada uno queda abajo como referencia.
+
+
 Dos revisiones autónomas (3 agentes) sobre todo el proyecto. Lo que **ya arreglé**
 queda al final. Esto es lo **pendiente de tu decisión** — son bugs PRE-existentes
 (no de hoy); no los toqué porque afectan a la lógica de XP/recordatorios que "tenéis
@@ -84,3 +89,19 @@ El núcleo está sano. Ningún hallazgo es pérdida de datos crítica (el XP es 
 datos esenciales). Los 🔴 1 y 2 corrompen el contador de XP con el tiempo; los 🟡 son
 casos borde. Mi sugerencia de orden si quieres que los aborde: **2 → 1 → 3 → 5 → 4**,
 y los ⚪ cuando apetezca.
+
+---
+
+## ✅ RESOLUCIÓN (2026-06-24) — los 7 resueltos
+
+| # | Hallazgo | Cómo se resolvió |
+|---|----------|------------------|
+| 🔴 1 | Bonus día perfecto no se revertía | `_revert_perfect_day_if_broken` en uncomplete/unmark de tarea/evento/rutina; idempotencia del bonus por NETO |
+| 🔴 2 | Doble reversión de XP | `_revert_last_gain` idempotente (solo revierte si la última fila es ganancia) |
+| 🟡 3 | Recordatorio duplicado si falla el marcado | Marcar `sent`/`reminder_*_sent` ANTES de enviar |
+| 🟡 4 | Recordatorio imposible anulaba los defaults | No se persiste el imposible; se entrega al momento y los defaults siguen activos |
+| 🟡 5 | Respuesta sin proteger | `_safe_reply`: reintenta en texto plano si el HTML falla |
+| ⚪ 6 | Objetivo de semana futura | Documentado como intencional (logro adelantado = on_time) + test |
+| ⚪ 7 | `datetime.now()` naive en scheduler | `date_utils.now_madrid_naive()` |
+
+Suite: **519/519**. Todo desplegado.
