@@ -755,17 +755,17 @@ def add_event_reminder(event_id: int, minutes_before: int) -> dict:
         fire_time = event_dt - timedelta(minutes=minutes_before)
         fires_immediately = fire_time <= now
 
-        conn.execute(
-            "INSERT INTO event_reminders "
-            "(event_id, offset_minutes, sent, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (
-                event_id,
-                minutes_before,
-                1 if fires_immediately else 0,
-                date_utils.now_iso(),
-            ),
-        )
+        # Si el aviso es imposible (su hora ya pasó al crearlo), NO persistimos
+        # la fila: se entrega de inmediato vía el valor de retorno, pero al no
+        # quedar fila en event_reminders no desactiva los avisos por defecto
+        # (1h/1d) del evento. Así el evento no se queda sin ningún recordatorio.
+        if not fires_immediately:
+            conn.execute(
+                "INSERT INTO event_reminders "
+                "(event_id, offset_minutes, sent, created_at) "
+                "VALUES (?, ?, 0, ?)",
+                (event_id, minutes_before, date_utils.now_iso()),
+            )
 
     return {
         "event_id": event_id,
@@ -1150,6 +1150,8 @@ def mark_objective_done(objective_id: int) -> dict:
         week_start = date.fromisoformat(row["week_start"])
         weeks_diff = (today_monday - week_start).days // 7
 
+        # weeks_diff < 0 → objetivo de una semana futura: completarlo antes de
+        # tiempo cuenta como logro a tiempo (intencional). 0 = semana actual.
         if weeks_diff <= 0:
             outcome = "on_time"
         elif weeks_diff == 1:

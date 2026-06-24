@@ -82,7 +82,8 @@ def test_add_event_reminder_future_inserts_pending():
 
 def test_add_event_reminder_past_window_fires_immediately():
     """Evento dentro de 10 min, offset 30 min → fire_time ya pasó →
-    sent=1 y fires_immediately=True."""
+    fires_immediately=True y NO se persiste fila (así no desactiva los
+    avisos por defecto del evento; se entrega de inmediato vía el retorno)."""
     ev = _seed_future_event(offset_hours=0.16)  # ~10 min en el futuro
     res = tools.add_event_reminder(ev["id"], 30)
     assert res["fires_immediately"] is True
@@ -91,7 +92,7 @@ def test_add_event_reminder_past_window_fires_immediately():
             "SELECT sent FROM event_reminders WHERE event_id = ?",
             (ev["id"],),
         ).fetchone()
-    assert row["sent"] == 1
+    assert row is None
 
 
 def test_add_event_reminder_idempotent_same_offset():

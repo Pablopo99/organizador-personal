@@ -1216,3 +1216,32 @@ async def test_on_message_natural_query_unauthorized_ignored(temp_db_for_bot, mo
 
     await bot._on_message(update, _make_context_with_bot())
     reply_mock.assert_not_called()
+
+
+# ---- Fix #5: el envío de la respuesta está protegido (HTML inválido) ----
+
+@pytest.mark.asyncio
+async def test_on_message_reply_falls_back_to_plain_on_badrequest(temp_db_for_bot, monkeypatch):
+    """Si el envío con HTML falla (HTML mal formado de la IA), se reintenta en
+    texto plano para que el usuario reciba algo (la mutación ya se aplicó)."""
+    from telegram.error import BadRequest
+    monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
+    monkeypatch.setattr(bot.brain, "handle_message", lambda text, user_id=0: "respuesta <b>rota")
+
+    calls = []
+    async def reply(text, **kwargs):
+        calls.append(kwargs.get("parse_mode"))
+        if kwargs.get("parse_mode") is not None:
+            raise BadRequest("can't parse entities")
+        # segundo intento (sin parse_mode) funciona
+
+    update = MagicMock()
+    update.message.text = "hola"
+    update.message.reply_text = reply
+    update.effective_user.id = 42
+
+    await bot._on_message(update, _make_context_with_bot())
+
+    # se intentó con HTML y luego en plano
+    assert calls[0] is not None
+    assert calls[-1] is None

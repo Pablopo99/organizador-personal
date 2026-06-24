@@ -324,6 +324,22 @@ def _calendar_button_keyboard(user_id: int):
     ]])
 
 
+async def _safe_reply(message, text: str, reply_markup=None) -> None:
+    """Envía la respuesta con HTML; si el HTML es inválido (p.ej. la IA generó
+    etiquetas mal formadas), reintenta en texto plano para que el usuario reciba
+    SIEMPRE algo (la mutación ya se ha aplicado en la BD)."""
+    try:
+        await message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+        )
+    except BadRequest:
+        log.warning("Reply con HTML falló; reintento en texto plano")
+        try:
+            await message.reply_text(text, reply_markup=reply_markup)
+        except Exception:
+            log.exception("Reply en texto plano también falló")
+
+
 async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text or not update.effective_user:
         return
@@ -350,7 +366,7 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if reply is None:
         return
     keyboard = _calendar_button_keyboard(user_id)
-    await update.message.reply_text(reply, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    await _safe_reply(update.message, reply, keyboard)
 
     # Si Claude disparó una subida de nivel, mandar mensaje aparte
     level_change = brain.pop_level_up(user_id)
@@ -420,7 +436,7 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if reply is None:
         return
     keyboard = _calendar_button_keyboard(from_user_id)
-    await update.message.reply_text(reply, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    await _safe_reply(update.message, reply, keyboard)
 
     # Si Claude disparó una subida de nivel, mandar mensaje aparte
     level_change = brain.pop_level_up(from_user_id)

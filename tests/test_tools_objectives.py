@@ -197,3 +197,16 @@ def test_update_objective_invalid_field_raises():
     o = tools.add_objective("Meditar", "2026-06-08")
     with pytest.raises(ValueError):
         tools.update_objective(o["id"], {"done": 1})
+
+
+def test_mark_objective_future_week_counts_on_time(monkeypatch):
+    """#6: completar un objetivo de una semana futura cuenta como on_time
+    (logro adelantado, comportamiento intencional)."""
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 6, 24))
+    # Objetivo para la semana que viene (lunes 2026-06-29).
+    o = tools.add_objective("Adelantado", "2026-06-29")
+    out = tools.mark_objective_done(o["id"])
+    assert out["outcome"] == "on_time"
+    assert out["updated"] == 1
