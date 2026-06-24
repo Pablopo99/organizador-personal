@@ -238,3 +238,79 @@ def test_uncomplete_recomplete_uncomplete_no_xp_leak(monkeypatch, temp_db):
     assert [r["outcome"] for r in rows] == [
         "on_time", "reversal", "on_time", "reversal"
     ]
+
+
+# ---- Fix #2: la reversión de XP es idempotente (doble desmarcado) ----
+
+def test_uncomplete_task_twice_reverts_once(monkeypatch, temp_db):
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("A", due_date="2026-05-30")
+    tools.complete_task(t["id"])
+    total_after_complete = tools._get_xp_total()
+    tools.uncomplete_task(t["id"])
+    total_after_uncomplete = tools._get_xp_total()
+    # segundo desmarcado NO debe volver a restar
+    tools.uncomplete_task(t["id"])
+    assert tools._get_xp_total() == total_after_uncomplete
+    assert total_after_uncomplete < total_after_complete
+
+
+def test_unmark_objective_twice_reverts_once(monkeypatch, temp_db):
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 28))
+    o = tools.add_objective("Meta", "2026-05-25")
+    tools.mark_objective_done(o["id"])
+    assert tools._get_xp_total() == 50
+    tools.unmark_objective_done(o["id"])
+    tools.unmark_objective_done(o["id"])
+    assert tools._get_xp_total() == 0
+
+
+# ---- Fix #1: el bonus de día perfecto se revierte si el día deja de serlo ----
+
+def test_perfect_day_bonus_reverted_on_uncomplete(monkeypatch, temp_db):
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    # Único item del día: una tarea. Completarla = día perfecto (+10 +20).
+    t = tools.add_task("Única", due_date="2026-05-30")
+    res = tools.complete_task(t["id"])
+    assert res["perfect_day_bonus"] == 20
+    assert tools._get_xp_total() == 30
+    # Al desmarcar, el día ya no es perfecto → se revierte tarea (-10) Y bonus (-20)
+    tools.uncomplete_task(t["id"])
+    assert tools._get_xp_total() == 0
+
+
+def test_perfect_day_rewarded_again_after_revert(monkeypatch, temp_db):
+    """Tras revertir el día perfecto, volver a completar lo re-otorga."""
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    t = tools.add_task("Única", due_date="2026-05-30")
+    tools.complete_task(t["id"])
+    tools.uncomplete_task(t["id"])
+    assert tools._get_xp_total() == 0
+    res = tools.complete_task(t["id"])
+    assert res["perfect_day_bonus"] == 20
+    assert tools._get_xp_total() == 30
+
+
+def test_perfect_day_not_reverted_if_still_perfect(monkeypatch, temp_db):
+    """Si tras desmarcar un ítem el día SIGUE siendo perfecto (quedan otros
+    completados y nada pendiente), el bonus no debe revertirse indebidamente."""
+    import date_utils
+    from datetime import date
+    monkeypatch.setattr(date_utils, "today_madrid", lambda: date(2026, 5, 30))
+    # Dos tareas hoy; completar ambas = día perfecto.
+    a = tools.add_task("A", due_date="2026-05-30")
+    b = tools.add_task("B", due_date="2026-05-30")
+    tools.complete_task(a["id"])
+    tools.complete_task(b["id"])  # aquí se otorga el día perfecto
+    # desmarcar B deja B pendiente → el día deja de ser perfecto → revierte bonus
+    tools.uncomplete_task(b["id"])
+    # queda: A=+10 (sin bonus). Total 10.
+    assert tools._get_xp_total() == 10

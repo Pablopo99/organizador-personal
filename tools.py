@@ -135,21 +135,59 @@ def _get_xp_total_with_conn(conn) -> int:
     return row["total"] or 0
 
 
-def _check_and_award_perfect_day(conn, today: date) -> int:
-    """Comprueba si hoy es perfecto y, si lo es y aún no se ha otorgado,
-    inserta la fila perfect_day y devuelve 20. Si no aplica, devuelve 0."""
-    import date_utils
-    today_iso = today.isoformat()
+def _revert_last_gain(conn, item_type: str, item_id: int) -> int:
+    """Revierte (inserta fila negativa) la última GANANCIA de XP de un ítem, de
+    forma IDEMPOTENTE: si la última fila del ítem ya es una reversión (o no hay
+    ganancia), no hace nada. Devuelve el XP revertido (negativo) o 0.
 
-    # ¿Ya otorgado hoy?
-    existing = conn.execute(
-        "SELECT 1 FROM xp_log "
-        "WHERE item_type = 'perfect_day' "
-        "AND substr(awarded_at, 1, 10) = ?",
-        (today_iso,),
+    Esto evita la doble reversión si se desmarca dos veces seguidas."""
+    last = conn.execute(
+        "SELECT outcome, xp_amount FROM xp_log "
+        "WHERE item_type = ? AND item_id = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (item_type, item_id),
     ).fetchone()
-    if existing:
+    if last is None or last["outcome"] == "reversal" or last["xp_amount"] <= 0:
         return 0
+    _insert_xp_log(
+        conn, item_type, item_id, "reversal",
+        xp_amount=-last["xp_amount"], streak_bonus=0,
+    )
+    return -last["xp_amount"]
+
+
+def _perfect_day_bonus_active(conn, today: date) -> bool:
+    """True si hay un bonus de día perfecto neto positivo otorgado hoy (es decir,
+    otorgado y no revertido)."""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(xp_amount), 0) AS net FROM xp_log "
+        "WHERE item_type = 'perfect_day' AND substr(awarded_at, 1, 10) = ?",
+        (today.isoformat(),),
+    ).fetchone()
+    return (row["net"] or 0) > 0
+
+
+def _revert_perfect_day_if_broken(conn, today: date) -> int:
+    """Si hoy tenía bonus de día perfecto activo pero ya NO es un día perfecto
+    (p.ej. tras desmarcar un ítem), revierte el bonus. Devuelve -20 o 0."""
+    if not _perfect_day_bonus_active(conn, today):
+        return 0
+    if _is_perfect_day(conn, today):
+        return 0
+    conn.execute(
+        "INSERT INTO xp_log "
+        "(item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at) "
+        "VALUES ('perfect_day', 0, 'reversal', -20, 0, ?)",
+        (today.isoformat() + "T00:00:00",),
+    )
+    return -20
+
+
+def _is_perfect_day(conn, today: date) -> bool:
+    """True si hoy es un día perfecto: había algo evaluable y todo lo de hoy
+    (rutinas esperadas, tareas con fecha hoy, eventos puntuales de hoy) está
+    completado y nada quedó pendiente."""
+    today_iso = today.isoformat()
 
     # Rutinas esperadas hoy
     routines = conn.execute(
@@ -170,7 +208,7 @@ def _check_and_award_perfect_day(conn, today: date) -> int:
         ).fetchall()
         completed_ids = {c["event_id"] for c in completed}
         if completed_ids != expected_routine_ids:
-            return 0
+            return False
 
     # Tareas con due_date=hoy pendientes
     pending_tasks = conn.execute(
@@ -180,7 +218,7 @@ def _check_and_award_perfect_day(conn, today: date) -> int:
         (today_iso,),
     ).fetchone()[0]
     if pending_tasks > 0:
-        return 0
+        return False
 
     # Eventos puntuales de hoy pendientes
     pending_events = conn.execute(
@@ -192,7 +230,7 @@ def _check_and_award_perfect_day(conn, today: date) -> int:
         (today_iso,),
     ).fetchone()[0]
     if pending_events > 0:
-        return 0
+        return False
 
     # ¿Había algo evaluable hoy?
     total_today_tasks = conn.execute(
@@ -209,11 +247,21 @@ def _check_and_award_perfect_day(conn, today: date) -> int:
         len(expected_routine_ids) + total_today_tasks + total_today_events
     )
     if total_today == 0:
-        return 0
+        return False
 
-    # Otorgar. Usar today (Madrid) en vez de now_iso() para que la idempotencia
-    # sobreviva a tests que solo patchean today_madrid (now_iso no es parcheable
-    # vía date_utils porque tools lo importa por nombre en otros sitios).
+    return True
+
+
+def _check_and_award_perfect_day(conn, today: date) -> int:
+    """Si hoy es perfecto y aún no hay un bonus activo, inserta la fila
+    perfect_day y devuelve 20. Si no aplica, 0. La idempotencia se basa en el
+    NETO (bonus - reversiones) para permitir re-otorgar tras una reversión."""
+    if _perfect_day_bonus_active(conn, today):
+        return 0
+    if not _is_perfect_day(conn, today):
+        return 0
+    # Usar today (Madrid) en vez de now_iso() para que la idempotencia sobreviva
+    # a tests que solo patchean today_madrid.
     conn.execute(
         "INSERT INTO xp_log "
         "(item_type, item_id, outcome, xp_amount, streak_bonus, awarded_at) "
@@ -727,23 +775,17 @@ def add_event_reminder(event_id: int, minutes_before: int) -> dict:
 
 
 def unmark_event_done(event_id: int) -> dict:
-    """Quita el done=1 + outcome=NULL de un evento puntual. Revierte XP."""
+    """Quita el done=1 + outcome=NULL de un evento puntual. Revierte XP
+    (idempotente) y el bonus de día perfecto si el día deja de serlo."""
+    import date_utils
+    today = date_utils.today_madrid()
     with db.connect() as conn:
         cur = conn.execute(
             "UPDATE events SET done = 0, outcome = NULL WHERE id = ?",
             (event_id,),
         )
-        original = conn.execute(
-            "SELECT xp_amount FROM xp_log "
-            "WHERE item_type = 'event' AND item_id = ? AND outcome != 'reversal' "
-            "ORDER BY id DESC LIMIT 1",
-            (event_id,),
-        ).fetchone()
-        if original and original["xp_amount"] > 0:
-            _insert_xp_log(
-                conn, "event", event_id, "reversal",
-                xp_amount=-original["xp_amount"], streak_bonus=0,
-            )
+        _revert_last_gain(conn, "event", event_id)
+        _revert_perfect_day_if_broken(conn, today)
     return {"id": event_id, "updated": cur.rowcount}
 
 
@@ -758,19 +800,8 @@ def uncomplete_routine_today(event_id: int) -> dict:
             (event_id, today),
         )
         if cur.rowcount > 0:
-            # Revertir el XP de la última fila xp_log de esta rutina
-            original = conn.execute(
-                "SELECT xp_amount FROM xp_log "
-                "WHERE item_type = 'routine' AND item_id = ? "
-                "AND outcome != 'reversal' "
-                "ORDER BY id DESC LIMIT 1",
-                (event_id,),
-            ).fetchone()
-            if original and original["xp_amount"] > 0:
-                _insert_xp_log(
-                    conn, "routine", event_id, "reversal",
-                    xp_amount=-original["xp_amount"], streak_bonus=0,
-                )
+            _revert_last_gain(conn, "routine", event_id)
+            _revert_perfect_day_if_broken(conn, date_utils.today_madrid())
     return {"event_id": event_id, "completion_date": today, "deleted": cur.rowcount}
 
 
@@ -1183,24 +1214,14 @@ def delete_objective(objective_id: int) -> dict:
 
 
 def unmark_objective_done(objective_id: int) -> dict:
-    """Desmarca un objetivo y revierte XP."""
+    """Desmarca un objetivo y revierte XP (idempotente). Los objetivos no
+    entran en el cálculo de día perfecto, así que ese bonus no se toca aquí."""
     with db.connect() as conn:
         cur = conn.execute(
             "UPDATE objectives SET done = 0, outcome = NULL WHERE id = ?",
             (objective_id,),
         )
-        original = conn.execute(
-            "SELECT xp_amount FROM xp_log "
-            "WHERE item_type = 'objective' AND item_id = ? "
-            "AND outcome != 'reversal' "
-            "ORDER BY id DESC LIMIT 1",
-            (objective_id,),
-        ).fetchone()
-        if original and original["xp_amount"] > 0:
-            _insert_xp_log(
-                conn, "objective", objective_id, "reversal",
-                xp_amount=-original["xp_amount"], streak_bonus=0,
-            )
+        _revert_last_gain(conn, "objective", objective_id)
     return {"id": objective_id, "updated": cur.rowcount}
 
 
@@ -1444,26 +1465,18 @@ def complete_task(task_id: int) -> dict:
 
 
 def uncomplete_task(task_id: int) -> dict:
-    """Desmarca una tarea: done=0, done_at=NULL, outcome=NULL.
-    Inserta una reversión en xp_log si había una ganancia previa."""
+    """Desmarca una tarea: done=0, done_at=NULL, outcome=NULL. Revierte XP
+    (idempotente) y el bonus de día perfecto si el día deja de serlo."""
+    import date_utils
+    today = date_utils.today_madrid()
     with db.connect() as conn:
         cur = conn.execute(
             "UPDATE tasks SET done = 0, done_at = NULL, outcome = NULL "
             "WHERE id = ?",
             (task_id,),
         )
-        # Buscar última fila xp_log para esta tarea no reversada
-        original = conn.execute(
-            "SELECT xp_amount FROM xp_log "
-            "WHERE item_type = 'task' AND item_id = ? AND outcome != 'reversal' "
-            "ORDER BY id DESC LIMIT 1",
-            (task_id,),
-        ).fetchone()
-        if original and original["xp_amount"] > 0:
-            _insert_xp_log(
-                conn, "task", task_id, "reversal",
-                xp_amount=-original["xp_amount"], streak_bonus=0,
-            )
+        _revert_last_gain(conn, "task", task_id)
+        _revert_perfect_day_if_broken(conn, today)
     return {"id": task_id, "updated": cur.rowcount}
 
 

@@ -225,13 +225,13 @@ def test_uncomplete_task_reverses_xp(monkeypatch):
     # 10 XP tarea + 20 día perfecto = 30 total
     assert tools._get_xp_total() == out["xp_awarded"] + out["perfect_day_bonus"]
     tools.uncomplete_task(t["id"])
-    # uncomplete solo revierte el XP de la tarea; el bonus de día perfecto queda
-    assert tools._get_xp_total() == out["perfect_day_bonus"]
+    # Al desmarcar, el día deja de ser perfecto → se revierte la tarea Y el bonus.
+    assert tools._get_xp_total() == 0
     with db.connect() as conn:
         reversals = conn.execute(
             "SELECT COUNT(*) FROM xp_log WHERE outcome = 'reversal'"
         ).fetchone()[0]
-    assert reversals == 1
+    assert reversals == 2
 
 
 def test_update_task_text_only():
