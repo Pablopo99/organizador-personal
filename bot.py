@@ -230,61 +230,69 @@ _ACTION_WORDS = {
     "marca", "completa", "hice", "termine", "acabe", "borra", "elimina", "quita",
     "cambia", "edita", "mueve", "sincroniza", "conecta",
 }
-# Palabras con las que una consulta de resumen suele EMPEZAR.
-_QUERY_STARTS = (
-    "que ", "muestra", "muestrame", "ensename", "dame", "ver ", "lista", "listame",
-)
-# Frases que, tal cual, son una consulta de resumen.
-_QUERY_EXACT = {
-    "hoy", "manana", "esta semana", "semana", "pendientes", "mis pendientes",
-    "mis tareas", "tareas", "objetivos", "mis objetivos", "mis metas", "metas",
-    "mi dia", "mi semana", "mi agenda", "agenda", "agenda de hoy",
-    "agenda de manana", "que tengo",
+# Palabras que confirman que la pregunta es sobre la AGENDA (no otra cosa).
+_AGENDA_WORDS = {
+    "tengo", "hay", "toca", "agenda", "dia", "plan", "planes", "eventos",
+    "cita", "citas",
 }
+# Frases-clave temporales que, tal cual, son una consulta de cada vista.
+_EXACT_HOY = {"hoy", "mi dia", "agenda de hoy", "agenda", "mi agenda", "que tengo"}
+_EXACT_MANANA = {"manana", "mi manana", "agenda de manana"}
+_EXACT_SEMANA = {"esta semana", "semana", "mi semana"}
 
 
 def match_summary_view(text: str) -> Optional[str]:
     """Detecta si `text` es una consulta de resumen en lenguaje natural y, si lo
     es, devuelve la vista a servir ('hoy'|'manana'|'semana'|'pendientes'|
-    'objetivos'). None si no es una consulta de resumen (irá a la IA).
+    'objetivos'). None si no lo es (irá a la IA).
 
-    Reglas: excluye órdenes de crear/accionar; exige una señal de consulta
-    (empieza por 'qué…/muéstrame/…' o es una frase-clave exacta); mapea por el
-    marcador temporal/tipo presente.
+    Reglas:
+    - Excluye órdenes de crear/accionar (apunta/añade/marca/…).
+    - Tareas/objetivos: bastan si hay pregunta, posesivo "mi(s)", o la frase
+      empieza por el tipo ("objetivos de la semana").
+    - Temporales (hoy/mañana/semana): exige que sea una pregunta de AGENDA
+      (empieza por "qué" + palabra de agenda como tengo/hay/toca) o una
+      frase-clave exacta. Así "qué compro hoy" o "ver si puedo mañana" NO entran.
     """
     n = _normalize_query(text)
     if not n:
         return None
 
     words = set(n.split())
-    if words & _ACTION_WORDS or "tengo que" in n:
+    if words & _ACTION_WORDS:
         return None
 
-    is_query = n in _QUERY_EXACT or n.startswith(_QUERY_STARTS)
-    # También es consulta si empieza por una palabra-clave de tipo y es una
-    # frase corta sin ":" ("objetivos de la semana", "tareas de hoy"). El ":"
-    # y la longitud descartan los formatos de creación rápida ("tarea: comprar…").
-    if (
-        not is_query
-        and ":" not in n
-        and len(n.split()) <= 5
-        and n.startswith(("objetivos", "pendientes", "tareas", "metas", "agenda"))
+    pregunta = n.startswith("que ")
+    posesivo = "mi" in words or "mis" in words
+    agenda = bool(words & _AGENDA_WORDS)
+    short_start = ":" not in n and len(words) <= 5
+
+    has_pend = bool(words & {"pendiente", "pendientes", "tarea", "tareas"})
+    has_obj = bool(words & {"objetivo", "objetivos", "meta", "metas"})
+
+    # Tareas / pendientes
+    if has_pend and (
+        pregunta or posesivo or (short_start and n.startswith(("pendientes", "tareas")))
     ):
-        is_query = True
-    if not is_query:
-        return None
-
-    if "pendiente" in n or "pendientes" in n or "tarea" in n or "tareas" in n:
         return "pendientes"
-    if "objetivo" in n or "objetivos" in n or "meta" in n or "metas" in n:
+    # Objetivos
+    if has_obj and (
+        pregunta or posesivo or (short_start and n.startswith(("objetivos", "metas")))
+    ):
         return "objetivos"
-    if "semana" in n:
+
+    # Temporales: pregunta de agenda, o frase-clave exacta.
+    need = pregunta and agenda
+    if "semana" in words and (need or n in _EXACT_SEMANA):
         return "semana"
-    if "manana" in n:
+    if "manana" in words and (need or n in _EXACT_MANANA):
         return "manana"
-    if "hoy" in n or "dia" in n or "agenda" in n:
+    if "hoy" in words and (need or n in _EXACT_HOY):
         return "hoy"
-    return "hoy"  # "que tengo" / "mi agenda" sin marcador → resumen de hoy
+    # Genéricas sin marcador temporal ("mi agenda", "qué tengo").
+    if n in _EXACT_HOY:
+        return "hoy"
+    return None
 
 
 def _render_summary_view(view_key: str, conn, today):
@@ -317,7 +325,7 @@ def _calendar_button_keyboard(user_id: int):
 
 
 async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.text:
+    if not update.message or not update.message.text or not update.effective_user:
         return
     user_id = update.effective_user.id
 

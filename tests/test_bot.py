@@ -1102,7 +1102,7 @@ def test_undo_store_is_capped(monkeypatch):
 def test_match_summary_view_hoy():
     for t in ["qué tengo hoy", "que tengo hoy", "qué hay hoy",
               "qué tengo para hoy", "mi día", "agenda de hoy", "hoy",
-              "¿qué tengo hoy?", "muéstrame hoy"]:
+              "¿qué tengo hoy?", "qué tengo que hacer hoy", "qué me toca hoy"]:
         assert bot.match_summary_view(t) == "hoy", t
 
 
@@ -1140,6 +1140,14 @@ def test_match_summary_view_ignores_create_actions():
 def test_match_summary_view_unrelated():
     for t in ["hola", "gracias", "cuánto es 2+2", "ponme una alarma",
               "cuéntame un chiste", ""]:
+        assert bot.match_summary_view(t) is None, t
+
+
+def test_match_summary_view_questions_not_about_agenda():
+    """Preguntas reales que NO son de agenda aunque lleven hoy/mañana.
+    (Hallazgos de la revisión de código: evitar falsos positivos.)"""
+    for t in ["qué compro hoy", "qué tiempo hace mañana", "qué pasa hoy",
+              "qué como hoy", "ver si puedo mañana", "dame de baja la rutina de hoy"]:
         assert bot.match_summary_view(t) is None, t
 
 
