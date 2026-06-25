@@ -451,3 +451,23 @@ async def test_check_reminders_custom_marks_before_send_no_resend_on_failure(mon
             "SELECT sent FROM event_reminders WHERE event_id = ?", (ev["id"],)
         ).fetchone()
     assert row["sent"] == 1
+
+
+@pytest.mark.asyncio
+async def test_impossible_custom_reminder_keeps_defaults(monkeypatch):
+    """Fix #4: un recordatorio custom imposible (su hora ya pasó al crearlo) no
+    debe desactivar los avisos por defecto (1h/1d) del evento."""
+    monkeypatch.setattr(scheduler, "ALLOWED_USER_ID", 42)
+    import tools
+    # Evento dentro de 1h. Pedimos "1 semana antes" → imposible (ya pasó).
+    when = (_date_utils.now_madrid_naive() + timedelta(hours=1)).replace(microsecond=0)
+    ev = tools.add_event("Viaje", when.isoformat(), "personal")
+    res = tools.add_event_reminder(ev["id"], 10080)  # 1 semana
+    assert res["fires_immediately"] is True
+
+    send_mock = AsyncMock()
+    await scheduler.check_reminders(_fake_context(send_mock))
+
+    # El aviso por defecto de 1h SÍ debe enviarse (el custom imposible no lo bloquea)
+    send_mock.assert_called_once()
+    assert "1h" in send_mock.call_args.kwargs["text"].lower()
