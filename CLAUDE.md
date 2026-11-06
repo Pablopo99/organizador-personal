@@ -35,19 +35,23 @@ flyctl secrets set --app mi-secretaria-pablo KEY=value
 
 ```
 Telegram ─► bot.py ─► brain.py ─► tools.py ─► db.py ─► SQLite
+                          │
+                          └─► llm_client.py ─► AiKit (API compatible OpenAI)
                 │                     ▲
                 └────► views.py ──────┘  (for /hoy, /pendientes, /semana, morning)
 ```
 
 - **`bot.py`** — Telegram listener. Auth-gates every entry point with `ALLOWED_USER_ID`. Routes:
-  - **Todos los slash commands son deterministas** (handlers directos, sin Claude): `/hoy`, `/manana`, `/pendientes`, `/semana`, `/objetivos`, `/rachas`, `/metricas`, `/nivel`, `/duplicados` llaman a su `render_*_view` en `views.py`. `/start` y `/ayuda` → `_on_start` (bienvenida). `_SLASH_PROMPTS` quedó vacío (era el mecanismo viejo de delegar a Claude). Respuesta instantánea y sin coste de API.
-  - Free text and voice → `brain.handle_message` (Claude with tool use).
+  - **Todos los slash commands son deterministas** (handlers directos, sin IA): `/hoy`, `/manana`, `/pendientes`, `/semana`, `/objetivos`, `/rachas`, `/metricas`, `/nivel`, `/duplicados` llaman a su `render_*_view` en `views.py`. `/start` y `/ayuda` → `_on_start` (bienvenida). `_SLASH_PROMPTS` quedó vacío (era el mecanismo viejo de delegar a la IA). Respuesta instantánea y sin coste de API.
+  - Free text and voice → `brain.handle_message` (AiKit with tool calls).
   - Button taps → `_on_callback_query`. Callback data format `{action}{type}:{id}[:{view}]` (e.g. `mE:42`, `mR:5`, `uT:7`, `xT:7:D` borrar). View letter (H/Hc/P/W/Wc/O/D) selecciona qué render repinta el mensaje; default H.
   - `app.add_error_handler(_on_error)` loguea excepciones no capturadas.
 
-- **`brain.py`** — Claude tool-use loop. One `_history` dict per `user_id` (in-memory, lost on restart). The system prompt is the source of truth for tone, formatting rules (HTML for Telegram), section templates and the strict rules for slash-command summaries.
+- **`llm_client.py`** — Único punto de contacto con la IA: AiKit (`https://cms.aikit.es/api/inference/chat/completions`, formato OpenAI). Convierte `TOOL_DEFINITIONS` (formato Anthropic `input_schema`) a formato OpenAI. 429 → `RateLimitError`; resto → `LLMError`; un reintento en 5xx/red. Modelo por `AIKIT_MODEL` (default `fast`). Nombres de modelo inexistentes caen en silencio a `aikit/fast` (se loguea).
 
-- **`tools.py`** — All Claude-callable functions plus a few **internal** helpers not registered in `TOOL_DEFINITIONS` (the `unmark_*` / `uncomplete_*` family, used only by callback handlers). `mark_event_done` is **smart-routed**: for non-recurring events it sets `done=1`; for events with `recurring_rule` it inserts a row in `routine_completions` for today's Madrid date (idempotent via UNIQUE).
+- **`brain.py`** — Tool-call loop (formato OpenAI: `tool_calls` → mensajes `role: "tool"`). Valida el JSON de `arguments`. One `_history` dict per `user_id` (in-memory, lost on restart). The system prompt is the source of truth for tone, formatting rules (HTML for Telegram), section templates and the strict rules for slash-command summaries.
+
+- **`tools.py`** — All AI-callable functions plus a few **internal** helpers not registered in `TOOL_DEFINITIONS` (the `unmark_*` / `uncomplete_*` family, used only by callback handlers). `mark_event_done` is **smart-routed**: for non-recurring events it sets `done=1`; for events with `recurring_rule` it inserts a row in `routine_completions` for today's Madrid date (idempotent via UNIQUE).
 
 - **`views.py`** — Deterministic renderers used by `/hoy` and `morning_summary`. Return `(html_text, InlineKeyboardMarkup | None)`. The keyboard has one row per item: `🔲 {title}` for pending, `✅ {title}` for done-today (tap toggles).
 
@@ -89,4 +93,4 @@ The user is non-technical — explain the *why*, not just the *what*. Present op
 - Persistent volume `data` mounted at `/data` — SQLite lives at `/data/organizador.db`.
 - `Dockerfile` sets `TZ=Europe/Madrid` so naive `datetime.now()` returns wall-clock Madrid time. Tests still patch `date_utils.today_madrid` for reproducibility.
 - Polling, not webhook — bot makes outbound calls to Telegram. No HTTP service exposed.
-- Secrets in Fly: `TELEGRAM_TOKEN`, `ANTHROPIC_API_KEY`, `ALLOWED_USER_ID`, `GROQ_API_KEY` (optional, for voice), `DB_PATH=/data/organizador.db`.
+- Secrets in Fly: `TELEGRAM_TOKEN`, `AIKIT_API_KEY`, `ALLOWED_USER_ID`, `GROQ_API_KEY` (optional, for voice), `DB_PATH=/data/organizador.db`.
