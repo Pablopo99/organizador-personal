@@ -249,3 +249,29 @@ def test_delete_event_success_204(monkeypatch):
             pass
     with patch("gcal_sync.requests.delete", return_value=R()):
         gcal_sync.delete_event("gcal-evt-1")
+
+
+def test_ensure_valid_token_clears_tokens_when_refresh_revoked(monkeypatch):
+    """Si Google responde invalid_grant (token caducado/revocado, típico con la
+    app OAuth en modo Testing: caduca a los 7 días), borramos los tokens y
+    lanzamos NotConnected para que el bot ofrezca reconectar en vez de fallar
+    en silencio con 'api_error' para siempre."""
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setattr(gcal_sync, "GOOGLE_CLIENT_SECRET", "csecret")
+    gcal_sync.save_tokens("old-at", "dead-rt", "2000-01-01T00:00:00")
+
+    class R:
+        status_code = 400
+
+        def json(self):
+            return {"error": "invalid_grant", "error_description": "Token has been expired or revoked."}
+
+        def raise_for_status(self):
+            import requests as r
+            raise r.HTTPError("400")
+
+    with patch("gcal_sync.requests.post", return_value=R()):
+        with pytest.raises(gcal_sync.NotConnected):
+            gcal_sync.ensure_valid_token()
+
+    assert gcal_sync.get_tokens() is None

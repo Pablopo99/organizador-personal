@@ -129,6 +129,18 @@ def ensure_valid_token() -> str:
         },
         timeout=15,
     )
+    if getattr(response, "status_code", 200) == 400:
+        try:
+            error_code = response.json().get("error")
+        except Exception:
+            error_code = None
+        if error_code == "invalid_grant":
+            # Refresh token caducado o revocado (con la app OAuth en modo
+            # "Testing" de Google caduca a los 7 días). Borramos los tokens
+            # para que el bot ofrezca reconectar en vez de fallar para siempre.
+            log.warning("Refresh token de Google revocado/caducado; hay que reconectar")
+            clear_tokens()
+            raise NotConnected("El token de Google ha caducado o se ha revocado.")
     response.raise_for_status()
     payload = response.json()
     new_expires = (
