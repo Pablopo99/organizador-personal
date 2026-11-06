@@ -113,6 +113,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO,
 )
+# httpx loguea a INFO la URL de cada petición, y la URL de la API de Telegram
+# incluye el token del bot → lo filtraría en los logs de Fly.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("bot")
 
 

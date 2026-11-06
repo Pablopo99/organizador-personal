@@ -1245,3 +1245,11 @@ async def test_on_message_reply_falls_back_to_plain_on_badrequest(temp_db_for_bo
     # se intentó con HTML y luego en plano
     assert calls[0] is not None
     assert calls[-1] is None
+
+
+def test_httpx_logs_silenced_to_avoid_leaking_telegram_token():
+    """httpx loguea a INFO la URL completa de cada petición, y la URL de la API
+    de Telegram lleva el token del bot. Debe estar en WARNING o más."""
+    import logging
+    import bot  # noqa: F401  (importar configura el logging)
+    assert logging.getLogger("httpx").level >= logging.WARNING
