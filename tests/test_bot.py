@@ -1,20 +1,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anthropic
-import httpx
 import pytest
 
 import bot
+import llm_client
 
 
-def _rate_limit_error() -> anthropic.RateLimitError:
-    """Construye un RateLimitError tal como lo lanza el SDK tras agotar reintentos."""
-    response = httpx.Response(429, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
-    return anthropic.RateLimitError(
-        message="rate_limit_error",
-        response=response,
-        body={"error": {"type": "rate_limit_error"}},
-    )
+def _rate_limit_error() -> llm_client.RateLimitError:
+    """Construye el error que lanza llm_client ante un 429 de AiKit."""
+    return llm_client.RateLimitError("ORG_BUDGET_EXCEEDED")
 
 
 def test_handle_unauthorized_user_returns_none():
@@ -44,7 +38,7 @@ def test_handle_brain_exception_returns_friendly_message(monkeypatch):
 
 
 def test_handle_rate_limit_error_returns_specific_message(monkeypatch):
-    """Cuando Anthropic devuelve 429 (rate limit), el bot debe explicar que es
+    """Cuando AiKit devuelve 429 (rate limit), el bot debe explicar que es
     un límite temporal y pedir reintento en ~1 minuto. NO el mensaje genérico
     'no puedo procesar' que es confuso."""
     monkeypatch.setattr(bot, "ALLOWED_USER_ID", 42)
