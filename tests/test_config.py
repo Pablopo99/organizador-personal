@@ -4,7 +4,8 @@ import config
 def test_config_loads_env_vars():
     # conftest.py garantiza valores por defecto para tests
     assert config.TELEGRAM_TOKEN
-    assert config.ANTHROPIC_API_KEY
+    assert config.AIKIT_API_KEY
+    assert config.AIKIT_MODEL
     assert isinstance(config.ALLOWED_USER_ID, int)
 
 

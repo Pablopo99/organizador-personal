@@ -1,6 +1,5 @@
 import os
 import tempfile
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,60 +21,81 @@ def temp_db(monkeypatch):
 
 
 def _text_response(text: str):
-    return SimpleNamespace(
-        stop_reason="end_turn",
-        content=[SimpleNamespace(type="text", text=text)],
-    )
+    """Mensaje final del asistente (formato OpenAI/AiKit)."""
+    return {"role": "assistant", "content": text}
 
 
 def _tool_use_then_text(tool_name: str, tool_input: dict, final_text: str):
-    """Simula dos turnos: primero tool_use, luego end_turn con texto."""
-    first = SimpleNamespace(
-        stop_reason="tool_use",
-        content=[
-            SimpleNamespace(type="text", text=""),
-            SimpleNamespace(
-                type="tool_use", id="toolu_1", name=tool_name, input=tool_input
-            ),
-        ],
-    )
-    second = _text_response(final_text)
-    return [first, second]
+    """Simula dos turnos: primero tool_calls, luego texto final."""
+    import json
+    first = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": tool_name, "arguments": json.dumps(tool_input)},
+        }],
+    }
+    return [first, _text_response(final_text)]
+
+
+def _mock_chat(monkeypatch):
+    """Sustituye llm_client.chat por un MagicMock y lo devuelve."""
+    mock = MagicMock()
+    monkeypatch.setattr(brain.llm_client, "chat", mock)
+    return mock
 
 
 def test_handle_message_text_only(monkeypatch):
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = _text_response("Hola, ¿en qué te ayudo?")
-    monkeypatch.setattr(brain, "_client", mock_client)
+    mock = _mock_chat(monkeypatch)
+    mock.return_value = _text_response("Hola, ¿en qué te ayudo?")
 
     reply = brain.handle_message("hola")
     assert "Hola" in reply
 
 
-def test_handle_message_system_uses_prompt_caching(monkeypatch):
-    """El system se manda como dos bloques: el estático con cache_control
-    (cachea tools+reglas) y la fecha/hora actual como bloque volátil aparte."""
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = _text_response("ok")
-    monkeypatch.setattr(brain, "_client", mock_client)
+def test_handle_message_sends_date_in_system(monkeypatch):
+    """La fecha/hora actual va al final del system prompt."""
+    mock = _mock_chat(monkeypatch)
+    mock.return_value = _text_response("ok")
 
     brain.handle_message("hola", user_id=1234)
 
-    system = mock_client.messages.create.call_args.kwargs["system"]
-    assert isinstance(system, list)
-    assert system[0]["cache_control"] == {"type": "ephemeral"}
-    # El bloque dinámico (fecha) NO lleva cache_control y va el último
-    assert "Fecha y hora ahora" in system[-1]["text"]
-    assert "cache_control" not in system[-1]
+    system = mock.call_args.kwargs["system"]
+    assert isinstance(system, str)
+    assert "Fecha y hora ahora" in system.splitlines()[-1]
+
+
+def test_handle_message_invalid_tool_arguments_reported_to_model(monkeypatch):
+    """AiKit no garantiza JSON válido: si los arguments no parsean, se devuelve
+    un error a la IA en vez de reventar."""
+    bad = {
+        "role": "assistant", "content": None,
+        "tool_calls": [{"id": "call_x", "type": "function",
+                        "function": {"name": "add_task", "arguments": "{roto"}}],
+    }
+    seen = []
+
+    def fake_chat(**kwargs):
+        seen.append(list(kwargs["messages"]))
+        return bad if len(seen) == 1 else _text_response("Perdona, repito")
+
+    monkeypatch.setattr(brain.llm_client, "chat", fake_chat)
+    reply = brain.handle_message("añade algo", user_id=5)
+    assert reply == "Perdona, repito"
+    tool_msg = seen[1][-1]
+    assert tool_msg["role"] == "tool"
+    assert tool_msg["tool_call_id"] == "call_x"
+    assert "ERROR" in tool_msg["content"]
 
 
 def test_handle_message_with_tool_use(monkeypatch):
     responses = _tool_use_then_text(
         "add_task", {"text": "comprar pan"}, "Hecho, añadida."
     )
-    mock_client = MagicMock()
-    mock_client.messages.create.side_effect = responses
-    monkeypatch.setattr(brain, "_client", mock_client)
+    mock = _mock_chat(monkeypatch)
+    mock.side_effect = responses
 
     reply = brain.handle_message("añade comprar pan")
     assert "Hecho" in reply
@@ -89,14 +109,12 @@ def test_handle_message_with_tool_use(monkeypatch):
 def test_history_persists_across_calls(monkeypatch):
     snapshots = []
 
-    def fake_create(**kwargs):
+    def fake_chat(**kwargs):
         # Capturamos una copia superficial de messages en el momento de la llamada
         snapshots.append(list(kwargs["messages"]))
         return _text_response("respuesta")
 
-    mock_client = MagicMock()
-    mock_client.messages.create.side_effect = fake_create
-    monkeypatch.setattr(brain, "_client", mock_client)
+    monkeypatch.setattr(brain.llm_client, "chat", fake_chat)
 
     brain.handle_message("hola", user_id=1)
     brain.handle_message("y ahora?", user_id=1)
@@ -111,9 +129,8 @@ def test_history_persists_across_calls(monkeypatch):
 
 
 def test_reset_history_clears_user(monkeypatch):
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = _text_response("ok")
-    monkeypatch.setattr(brain, "_client", mock_client)
+    mock = _mock_chat(monkeypatch)
+    mock.return_value = _text_response("ok")
 
     brain.handle_message("hola", user_id=7)
     assert 7 in brain._history
@@ -122,9 +139,8 @@ def test_reset_history_clears_user(monkeypatch):
 
 
 def test_trim_history_keeps_last_n_turns(monkeypatch):
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = _text_response("ok")
-    monkeypatch.setattr(brain, "_client", mock_client)
+    mock = _mock_chat(monkeypatch)
+    mock.return_value = _text_response("ok")
     monkeypatch.setattr(brain, "_MAX_TURNS_IN_HISTORY", 3)
 
     for i in range(5):
@@ -273,5 +289,5 @@ def test_system_prompt_size_under_budget():
     prompt = brain._system_prompt()
     assert len(prompt) < 8200, (
         f"system prompt ha crecido a {len(prompt)} chars. "
-        f"Revisa qué añadiste; cada turno cuenta contra el ITPM de Anthropic."
+        f"Revisa qué añadiste; cada turno cuesta tokens en cada llamada."
     )

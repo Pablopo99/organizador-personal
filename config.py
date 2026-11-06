@@ -20,7 +20,9 @@ def _require(name: str) -> str:
 
 
 TELEGRAM_TOKEN = _require("TELEGRAM_TOKEN")
-ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
+AIKIT_API_KEY = _require("AIKIT_API_KEY")
+# Modelo de AiKit: "fast" (2-6 s) o "expert" (más lento). Ver docs de AiKit.
+AIKIT_MODEL = os.environ.get("AIKIT_MODEL", "fast")
 ALLOWED_USER_ID = int(_require("ALLOWED_USER_ID"))
 
 # Opcional: si está vacía, el bot ignorará mensajes de voz con respuesta de "no configurado".
@@ -44,4 +46,3 @@ USER_NAME = os.environ.get("USER_NAME", "Pablo")
 TIMEZONE = "Europe/Madrid"
 DB_PATH = os.environ.get("DB_PATH") or str(_PROJECT_ROOT / "organizador.db")
 CATEGORIES = ("medical", "work", "personal", "other")
-CLAUDE_MODEL = "claude-sonnet-4-6"

@@ -1,35 +1,31 @@
-"""Orquestación de Claude: envía mensajes, gestiona tool use, devuelve respuesta."""
+"""Orquestación de la IA (AiKit): envía mensajes, gestiona tool calls, devuelve respuesta."""
+import json
 import logging
 from datetime import datetime
 
-import anthropic
-
 import db
+import llm_client
 import tools
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TIMEZONE, USER_NAME
+from config import TIMEZONE, USER_NAME
 
 log = logging.getLogger(__name__)
 
-_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
 _MAX_TOOL_TURNS = 8
-# Recortado de 15 → 8 turnos para reducir tokens por llamada y bajar la
-# probabilidad de chocar con el rate limit de Anthropic (Tier 1 = 30k ITPM).
-# Con system+tools cacheados (~4.6k tokens), cada turno de historial añade
-# ~200-400 tokens; 8 turnos ≈ ~3k tokens de historial vs ~6k antes.
+# 8 turnos de historial: suficiente contexto sin disparar los tokens (y el
+# coste) de cada llamada. Cada turno añade ~200-400 tokens.
 _MAX_TURNS_IN_HISTORY = 8
 
 # Historial conversacional por usuario. En memoria — se pierde al reiniciar el bot.
 _history: dict[int, list[dict]] = {}
 
 # Event id pendiente de "ofrecer botón Mandar a Calendar" por usuario.
-# Se rellena cuando Claude llama a add_event sin sincronizar y se vacía cuando
-# bot.py lee el registro (o cuando Claude llama a push_event_to_calendar).
+# Se rellena cuando la IA llama a add_event sin sincronizar y se vacía cuando
+# bot.py lee el registro (o cuando la IA llama a push_event_to_calendar).
 _pending_calendar_button: dict[int, int] = {}
 
 # Subida de nivel pendiente de notificar por usuario.
 # Se rellena cuando una tool devuelve level_after > level_before y se consume
-# en bot.py tras enviar la respuesta normal de Claude.
+# en bot.py tras enviar la respuesta normal de la IA.
 _pending_level_up: dict[int, tuple[int, int]] = {}
 
 
@@ -43,7 +39,7 @@ def pop_level_up(user_id: int):
 
 # Recordatorios custom que deben enviarse inmediatamente (offset ya pasado
 # al añadirlos). Se rellenan cuando una tool devuelve fires_immediately=True
-# y se consumen en bot.py tras enviar la respuesta normal de Claude.
+# y se consumen en bot.py tras enviar la respuesta normal de la IA.
 _pending_immediate_reminders: dict[int, list[dict]] = {}
 
 
@@ -185,140 +181,126 @@ def handle_message(user_text: str, user_id: int = 0) -> str:
     history = _history.setdefault(user_id, [])
     history.append({"role": "user", "content": user_text})
 
-    # System como dos bloques: el estático (grande, con cache_control para
-    # cachear tools + reglas) y la fecha/hora actual (volátil, fuera de caché).
+    # La fecha/hora va al final del system prompt (la parte estática va delante).
     now = datetime.now().isoformat(timespec="minutes")
     weekday = [
         "lunes", "martes", "miércoles", "jueves",
         "viernes", "sábado", "domingo",
     ][datetime.now().weekday()]
-    system = [
-        {
-            "type": "text",
-            "text": _system_prompt(),
-            "cache_control": {"type": "ephemeral"},
-        },
-        {
-            "type": "text",
-            "text": f"Fecha y hora ahora: {now} ({weekday}).",
-        },
-    ]
+    system = f"{_system_prompt()}\n\nFecha y hora ahora: {now} ({weekday})."
 
     for _ in range(_MAX_TOOL_TURNS):
-        response = _client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=4096,
+        message = llm_client.chat(
             system=system,
-            tools=tools.TOOL_DEFINITIONS,
             messages=history,
+            tools=tools.TOOL_DEFINITIONS,
         )
+        tool_calls = message.get("tool_calls") or []
 
-        if response.stop_reason == "end_turn":
-            history.append({"role": "assistant", "content": response.content})
+        if not tool_calls:
+            text = (message.get("content") or "").strip()
+            history.append({"role": "assistant", "content": text})
             _trim_history(user_id)
-            return _extract_text(response)
+            return text or "(Sin respuesta)"
 
-        if response.stop_reason == "tool_use":
-            history.append({"role": "assistant", "content": response.content})
-            tool_results = []
-            for block in response.content:
-                if getattr(block, "type", None) != "tool_use":
-                    continue
-                try:
-                    result = tools.dispatch(block.name, dict(block.input))
-                    if (
-                        block.name == "add_event"
-                        and isinstance(result, dict)
-                        and "id" in result
-                        and "gcal_event_id" not in result  # ya sincronizado en línea
-                    ):
-                        record_pending_calendar_button(user_id, result["id"])
-                    elif block.name == "push_event_to_calendar":
-                        clear_pending_calendar_button(user_id)
-                    if isinstance(result, dict):
-                        lb = result.get("level_before")
-                        la = result.get("level_after")
-                        if (
-                            lb is not None and la is not None and la > lb
-                        ):
-                            record_level_up(user_id, lb, la)
-                    if isinstance(result, dict):
-                        # Caso 1: add_event_reminder con fires_immediately=True
-                        if (
-                            result.get("fires_immediately")
-                            and result.get("event_id")
-                            and result.get("offset_minutes")
-                        ):
-                            with db.connect() as _c:
-                                _r = _c.execute(
-                                    "SELECT title FROM events WHERE id = ?",
-                                    (result["event_id"],),
-                                ).fetchone()
-                            if _r:
-                                record_immediate_reminder(
-                                    user_id,
-                                    event_id=result["event_id"],
-                                    offset_minutes=result["offset_minutes"],
-                                    title=_r["title"],
-                                )
-                        # Caso 2: add_event con reminders_added inserto alguno con sent=1.
-                        # add_event no marca fires_immediately en su retorno
-                        # principal porque procesa una lista; leemos event_reminders
-                        # cuya sent=1 recién insertada para este event_id.
-                        if (
-                            block.name == "add_event"
-                            and result.get("reminders_added")
-                        ):
-                            with db.connect() as _c:
-                                _ev = _c.execute(
-                                    "SELECT title FROM events WHERE id = ?",
-                                    (result["id"],),
-                                ).fetchone()
-                                _rows = _c.execute(
-                                    "SELECT offset_minutes FROM event_reminders "
-                                    "WHERE event_id = ? AND sent = 1",
-                                    (result["id"],),
-                                ).fetchall()
-                            if _ev:
-                                for _row in _rows:
-                                    record_immediate_reminder(
-                                        user_id,
-                                        event_id=result["id"],
-                                        offset_minutes=_row["offset_minutes"],
-                                        title=_ev["title"],
-                                    )
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": str(result),
-                    })
-                except Exception as exc:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": f"ERROR: {exc}",
-                        "is_error": True,
-                    })
-            history.append({"role": "user", "content": tool_results})
-            continue
-
-        log.warning(
-            "stop_reason inesperado: %s (user=%s)",
-            response.stop_reason,
-            user_id,
-        )
-        history.append({"role": "assistant", "content": response.content})
-        _trim_history(user_id)
-        return _extract_text(response) or "(Sin respuesta)"
+        history.append({
+            "role": "assistant",
+            "content": message.get("content"),
+            "tool_calls": tool_calls,
+        })
+        for call in tool_calls:
+            history.append({
+                "role": "tool",
+                "tool_call_id": call.get("id"),
+                "content": _run_tool_call(call, user_id),
+            })
 
     _trim_history(user_id)
     return "Demasiados pasos internos, vuelve a intentarlo más simple."
 
 
+def _run_tool_call(call: dict, user_id: int) -> str:
+    """Ejecuta una tool call de la IA y devuelve el resultado como texto."""
+    function = call.get("function") or {}
+    name = function.get("name", "")
+    raw_args = function.get("arguments") or "{}"
+    try:
+        args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+        if not isinstance(args, dict):
+            raise ValueError("los argumentos no son un objeto JSON")
+    except (ValueError, TypeError) as exc:
+        log.warning("Argumentos inválidos para %s: %r", name, raw_args)
+        return f"ERROR: argumentos JSON inválidos ({exc}). Vuelve a llamar a la herramienta con JSON válido."
+    try:
+        result = tools.dispatch(name, args)
+        _apply_side_effects(name, result, user_id)
+        return str(result)
+    except Exception as exc:
+        return f"ERROR: {exc}"
+
+
+def _apply_side_effects(name: str, result, user_id: int) -> None:
+    """Registra lo que bot.py debe mostrar tras la respuesta (botón Calendar,
+    subida de nivel, recordatorios inmediatos)."""
+    if (
+        name == "add_event"
+        and isinstance(result, dict)
+        and "id" in result
+        and "gcal_event_id" not in result  # ya sincronizado en línea
+    ):
+        record_pending_calendar_button(user_id, result["id"])
+    elif name == "push_event_to_calendar":
+        clear_pending_calendar_button(user_id)
+    if not isinstance(result, dict):
+        return
+    lb = result.get("level_before")
+    la = result.get("level_after")
+    if lb is not None and la is not None and la > lb:
+        record_level_up(user_id, lb, la)
+    # Caso 1: add_event_reminder con fires_immediately=True
+    if (
+        result.get("fires_immediately")
+        and result.get("event_id")
+        and result.get("offset_minutes")
+    ):
+        with db.connect() as _c:
+            _r = _c.execute(
+                "SELECT title FROM events WHERE id = ?",
+                (result["event_id"],),
+            ).fetchone()
+        if _r:
+            record_immediate_reminder(
+                user_id,
+                event_id=result["event_id"],
+                offset_minutes=result["offset_minutes"],
+                title=_r["title"],
+            )
+    # Caso 2: add_event con reminders_added insertó alguno con sent=1.
+    if name == "add_event" and result.get("reminders_added"):
+        with db.connect() as _c:
+            _ev = _c.execute(
+                "SELECT title FROM events WHERE id = ?",
+                (result["id"],),
+            ).fetchone()
+            _rows = _c.execute(
+                "SELECT offset_minutes FROM event_reminders "
+                "WHERE event_id = ? AND sent = 1",
+                (result["id"],),
+            ).fetchall()
+        if _ev:
+            for _row in _rows:
+                record_immediate_reminder(
+                    user_id,
+                    event_id=result["id"],
+                    offset_minutes=_row["offset_minutes"],
+                    title=_ev["title"],
+                )
+
+
 def _trim_history(user_id: int) -> None:
-    """Recorta el historial a los últimos N turnos completos, sin partir pares tool_use/tool_result."""
+    """Recorta el historial a los últimos N turnos completos, sin partir pares tool_calls/tool."""
     history = _history.get(user_id, [])
-    # Índices de mensajes "user con texto" (no de tool_result), que marcan el inicio de un turno
+    # Índices de mensajes del usuario, que marcan el inicio de un turno
     turn_starts = [
         i for i, m in enumerate(history)
         if m["role"] == "user" and isinstance(m.get("content"), str)
@@ -327,11 +309,3 @@ def _trim_history(user_id: int) -> None:
         return
     cut_at = turn_starts[-_MAX_TURNS_IN_HISTORY]
     _history[user_id] = history[cut_at:]
-
-
-def _extract_text(response) -> str:
-    chunks = [
-        getattr(b, "text", "") for b in response.content
-        if getattr(b, "type", None) == "text"
-    ]
-    return "".join(chunks).strip()
